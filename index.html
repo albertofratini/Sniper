@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#1a1220" />
+    <title>Toy Troopers</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%235c8a2e'/%3E%3Cpath d='M18 36h28v8H18z' fill='%23f6c42c'/%3E%3Ccircle cx='32' cy='24' r='10' fill='%23f6c42c'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game"></canvas>
+
+      <!-- HUD -->
+      <div id="hud" class="hidden">
+        <div id="damage-vignette"></div>
+        <div id="hit-dirs"></div>
+        <div class="hud-top">
+          <div id="wave-label">WAVE <b id="wave-num">1</b> / 5</div>
+          <div id="wave-bar"><div id="wave-bar-fill"></div></div>
+        </div>
+        <div class="hud-topright">
+          <div class="chip"><span class="chip-label">ENEMIES</span><b id="enemy-count">0</b></div>
+          <div class="chip score"><span class="chip-label">SCORE</span><b id="score">0</b></div>
+        </div>
+        <button id="pause-btn" class="touch-only" aria-label="Pause">II</button>
+        <div id="crosshair">
+          <i class="c-t"></i><i class="c-b"></i><i class="c-l"></i><i class="c-r"></i><i class="c-dot"></i>
+        </div>
+        <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+        <div class="hud-bottomleft">
+          <div id="health-wrap">
+            <div id="health-icon">+</div>
+            <div id="health-bar"><div id="health-fill"></div><div id="health-lag"></div></div>
+            <b id="health-num">100</b>
+          </div>
+        </div>
+        <div class="hud-bottomright">
+          <div id="weapon-name">ASSAULT BLASTER</div>
+          <div id="ammo"><b id="ammo-mag">30</b><span id="ammo-res">/ ∞</span></div>
+          <div id="weapon-slots"><span data-w="0">1</span><span data-w="1">2</span><span data-w="2">3</span></div>
+          <div id="reload-hint" class="hidden">RELOADING</div>
+        </div>
+        <div id="banner"></div>
+        <div id="toast"></div>
+      </div>
+
+      <!-- Mobile controls -->
+      <div id="touch" class="hidden">
+        <div id="look-zone"></div>
+        <div id="move-zone"></div>
+        <div id="stick-base"><div id="stick-knob"></div></div>
+        <div id="btns">
+          <button class="tbtn" id="btn-fire" data-act="fire"><span>FIRE</span></button>
+          <button class="tbtn" id="btn-jump" data-act="jump"><span>JUMP</span></button>
+          <button class="tbtn" id="btn-reload" data-act="reload"><span>R</span></button>
+          <button class="tbtn" id="btn-melee" data-act="melee"><span>BASH</span></button>
+          <button class="tbtn" id="btn-swap" data-act="swap"><span>SWAP</span></button>
+          <button class="tbtn" id="btn-crouch" data-act="crouch"><span>DUCK</span></button>
+        </div>
+      </div>
+
+      <!-- Start screen -->
+      <div id="menu" class="screen">
+        <div class="menu-inner">
+          <div class="logo">
+            <div class="logo-top">TOY</div>
+            <div class="logo-bottom">TROOPERS</div>
+          </div>
+          <div class="tagline">SURVIVE THE BEDROOM</div>
+          <button id="play-btn" class="big-btn">PLAY</button>
+          <div id="loading">Unpacking toys…</div>
+          <div class="controls-hint desktop-only">
+            WASD move · Mouse look · Click fire · Shift sprint · Space jump · C crouch<br />
+            R reload · F bash · 1/2/3 or wheel switch weapon · Esc pause
+          </div>
+          <div class="controls-hint touch-only">
+            Left thumb: move (push far to sprint) · Right thumb: look · Hold FIRE and drag to aim
+          </div>
+        </div>
+      </div>
+
+      <!-- Pause -->
+      <div id="pause" class="screen hidden">
+        <div class="menu-inner">
+          <div class="title-sm">PAUSED</div>
+          <button id="resume-btn" class="big-btn">RESUME</button>
+          <button id="restart-btn2" class="small-btn">RESTART</button>
+          <label class="sens">LOOK SENSITIVITY <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1" /></label>
+        </div>
+      </div>
+
+      <!-- End screen -->
+      <div id="end" class="screen hidden">
+        <div class="menu-inner">
+          <div id="end-title" class="title-sm">YOU GOT PACKED AWAY</div>
+          <div id="end-stats"></div>
+          <button id="restart-btn" class="big-btn">PLAY AGAIN</button>
+        </div>
+      </div>
+
+      <div id="rotate" class="hidden">
+        <div class="rotate-phone"></div>
+        <div>ROTATE YOUR PHONE</div>
+        <small>Toy Troopers plays in landscape</small>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
