@@ -30,6 +30,10 @@ export interface EnemyCtx {
   listener: Player;
   world: CollisionWorld;
   nav: NavGrid;
+  /** flow field for big enemies (robots): wider clearance */
+  navLarge: NavGrid;
+  /** flow field for the boss */
+  navHuge: NavGrid;
   fx: Effects;
   proj: Projectiles;
   time: number;
@@ -97,6 +101,10 @@ export abstract class Enemy {
   /** pieces that pop off on death */
   protected detach: THREE.Object3D[] = [];
   knockResist = 1;
+  protected moveWanted = false;
+  protected stuckCount = 0;
+  /** set after repeatedly failing to move: the game teleports it to a valid spot */
+  needsRelocate = false;
   /** flash-cube stun time */
   stun = 0;
   /** network id (co-op) */
@@ -247,19 +255,26 @@ export abstract class Enemy {
     }
     const dist = Math.hypot(p.x - this.pos.x, p.z - this.pos.z);
     const playerHigh = ctx.player.pos.y > this.pos.y + 3;
-    if ((this.hasLos && dist < directRange && !playerHigh) || dist < 2) {
+    const nav = this.radius > 2 ? ctx.navHuge : this.radius > 0.9 ? ctx.navLarge : ctx.nav;
+    // walk straight only when very close; otherwise follow the flow field around furniture
+    const direct = Math.min(directRange, this.radius > 0.9 ? 6 : 5);
+    if ((this.hasLos && dist < direct && !playerHigh) || dist < 2) {
       this.moveDir.set(p.x - this.pos.x, 0, p.z - this.pos.z).normalize();
-    } else if (!ctx.nav.steer(this.pos.x, this.pos.z, this.moveDir)) {
+    } else if (!nav.steer(this.pos.x, this.pos.z, this.moveDir)) {
       this.moveDir.set(p.x - this.pos.x, 0, p.z - this.pos.z).normalize();
     }
-    // unstick
+    // unstick: nudge first, then ask the game to move it somewhere sensible
     this.stuckT += dt;
     if (this.stuckT > 1.2) {
-      if (this.pos.distanceTo(this.lastPos) < 0.6) {
+      const moved = this.pos.distanceTo(this.lastPos);
+      if (this.moveWanted && moved < 0.6) {
+        this.stuckCount++;
         this.vel.x += (Math.random() - 0.5) * 12;
         this.vel.z += (Math.random() - 0.5) * 12;
         if (this.grounded) this.vel.y = 7;
-      }
+        if (this.stuckCount >= 3) this.needsRelocate = true;
+      } else this.stuckCount = 0;
+      this.moveWanted = false;
       this.stuckT = 0;
       this.lastPos.copy(this.pos);
     }
@@ -267,6 +282,7 @@ export abstract class Enemy {
   }
 
   protected walk(dir: THREE.Vector3, speed: number, dt: number, accel = 30) {
+    if (speed > 0.5) this.moveWanted = true;
     const tx = dir.x * speed, tz = dir.z * speed;
     const a = (this.grounded ? accel : accel * 0.15) * dt;
     const dx = tx - this.vel.x, dz = tz - this.vel.z;
@@ -1069,8 +1085,7 @@ export class Boss extends Enemy {
     this.stateT -= dt;
     this.key.rotation.z += dt * 2.5;
     this.core.emissiveIntensity = 2 + Math.sin(this.anim * 5) * 0.8;
-    const dist = Math.hypot(pl.pos.x - this.pos.x, pl.pos.z - this.pos.z);
-    this.moveDir.set(pl.pos.x - this.pos.x, 0, pl.pos.z - this.pos.z).normalize();
+    const dist = this.navigate(ctx, dt, 14);
     if (this.intro > 0) {
       this.intro -= dt;
       this.faceToward(pl.pos, dt, 2);

@@ -40,6 +40,8 @@ export class Game {
   readonly mats: Materials;
   readonly room: BedroomInfo;
   readonly nav: NavGrid;
+  readonly navLarge: NavGrid;
+  readonly navHuge: NavGrid;
   readonly player: Player;
   readonly weapons: WeaponSystem;
   readonly fx: Effects;
@@ -114,6 +116,8 @@ export class Game {
     this.scene.add(this.room.train);
     this.setupLights();
     this.nav = new NavGrid(this.world);
+    this.navLarge = new NavGrid(this.world, 3.8, 1.5);
+    this.navHuge = new NavGrid(this.world, 10.5, 3.0);
     // make sure no spawn or pickup point sits inside furniture
     const fix = (p: THREE.Vector3) => p.copy(this.freeSpot(p));
     this.room.playerSpawns.forEach(fix);
@@ -205,9 +209,9 @@ export class Game {
     (window as unknown as { __game: Game }).__game = this;
   }
 
-  private spotBlocked(p: THREE.Vector3, r: number) {
+  private spotBlocked(p: THREE.Vector3, r: number, h = 1.9) {
     for (const b of this.world.query(p.x - r - 1, p.z - r - 1, p.x + r + 1, p.z + r + 1)) {
-      if (b.minY > 1.9 || b.maxY < 0.55) continue;
+      if (b.minY > h || b.maxY < 0.55) continue;
       const cx = Math.max(b.minX, Math.min(p.x, b.maxX)), cz = Math.max(b.minZ, Math.min(p.z, b.maxZ));
       if (Math.hypot(p.x - cx, p.z - cz) < r) return true;
     }
@@ -430,6 +434,7 @@ export class Game {
     this.hud.score(0);
     this.waves.state = 'done';
     this.nav.update(this.player.pos.x, this.player.pos.z);
+    this.navLarge.update(this.player.pos.x, this.player.pos.z);
   }
 
   private pickSpawn(): THREE.Vector3 {
@@ -505,21 +510,72 @@ export class Game {
     return list;
   }
 
-  private spawnWaveEnemy(type: EnemyType, hard: boolean) {
-    let pos: THREE.Vector3;
-    if (type === 'boss') {
-      pos = this.room.bossSpawn.clone();
-    } else {
-      const ts = this.targets().filter((t) => t.alive);
-      const pts = this.room.spawnPoints
-        .map((p, i) => ({ p, i, d: Math.min(...ts.map((t) => Math.hypot(p.x - t.pos.x, p.z - t.pos.z)), 999) }))
-        .filter((o) => o.d > 18 && this.spawnCooldown[o.i] <= 0)
-        .sort((a, b) => a.d - b.d);
-      const pick = pts.length ? pts[Math.floor(Math.random() * Math.min(4, pts.length))] : { p: this.room.spawnPoints[0], i: 0 };
+  private static readonly SIZE: Record<EnemyType, [number, number]> = {
+    trooper: [0.5, 1.9], robot: [1.1, 3.5], chomper: [0.75, 1.6], bug: [0.32, 0.5], boss: [2.6, 10],
+  };
+
+  /** Is p a good place for an enemy of this size: clear of furniture and connected to the players? */
+  private spawnOk(p: THREE.Vector3, type: EnemyType) {
+    const [r, h] = Game.SIZE[type];
+    if (Math.abs(p.x) > 83 - r || Math.abs(p.z) > 74 - r) return false;
+    if (this.spotBlocked(p, r + 0.35, h)) return false;
+    const nav = r > 2 ? this.navHuge : r > 0.9 ? this.navLarge : this.nav;
+    return nav.distAt(p.x, p.z) >= 0;
+  }
+
+  /** Nearest valid spot around p for this enemy type (or null). */
+  private validSpawnNear(p: THREE.Vector3, type: EnemyType, maxR = 14) {
+    if (this.spawnOk(p, type)) return p.clone();
+    for (let r = 1; r < maxR; r += 0.75)
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2 + r;
+        const q = new THREE.Vector3(p.x + Math.cos(a) * r, 0, p.z + Math.sin(a) * r);
+        if (this.spawnOk(q, type)) return q;
+      }
+    return null;
+  }
+
+  private chooseSpawn(type: EnemyType): THREE.Vector3 {
+    const ts = this.targets().filter((t) => t.alive);
+    const distTo = (p: THREE.Vector3) => Math.min(...ts.map((t) => Math.hypot(p.x - t.pos.x, p.z - t.pos.z)), 999);
+    const cands = this.room.spawnPoints
+      .map((p, i) => ({ p: this.validSpawnNear(p, type, 8), i }))
+      .filter((o): o is { p: THREE.Vector3; i: number } => !!o.p && this.spawnCooldown[o.i] <= 0)
+      .map((o) => ({ ...o, d: distTo(o.p) }))
+      .filter((o) => o.d > 18)
+      .sort((a, b) => a.d - b.d);
+    if (cands.length) {
+      const pick = cands[Math.floor(Math.random() * Math.min(4, cands.length))];
       this.spawnCooldown[pick.i] = 1.2;
-      pos = pick.p.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.5, 0, (Math.random() - 0.5) * 2.5));
+      const j = pick.p.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2));
+      return this.spawnOk(j, type) ? j : pick.p;
     }
+    // fallback: any open, reachable floor 20-60 units from the players
+    for (let k = 0; k < 200; k++) {
+      const q = new THREE.Vector3((Math.random() - 0.5) * 160, 0, (Math.random() - 0.5) * 140);
+      const d = distTo(q);
+      if (d > 20 && d < 60 && this.spawnOk(q, type)) return q;
+    }
+    return this.room.bossSpawn.clone();
+  }
+
+  private spawnWaveEnemy(type: EnemyType, hard: boolean) {
+    if (type === 'boss') this.navHuge.update(this.player.pos.x, this.player.pos.z, this.targets().slice(1).map((t) => ({ x: t.pos.x, z: t.pos.z })));
+    const pos = type === 'boss' ? this.validSpawnNear(this.room.bossSpawn, 'boss', 30) ?? this.room.bossSpawn.clone() : this.chooseSpawn(type);
     this.spawnEnemy(type, pos, hard);
+  }
+
+  /** Teleport an enemy that keeps getting stuck to a fresh valid spot. */
+  private relocate(e: Enemy) {
+    e.needsRelocate = false;
+    const c = e.pos.clone().add(new THREE.Vector3(0, e.height * 0.5, 0));
+    this.fx.puff(c, 0xffffff, e.height * 0.4, e.height, 0.4);
+    const near = this.validSpawnNear(e.pos, e.type, 10);
+    const p = near && near.distanceTo(e.pos) > 1.5 ? near : this.chooseSpawn(e.type);
+    e.pos.copy(p);
+    e.vel.set(0, 0, 0);
+    e.netPos.copy(p);
+    this.fx.puff(p.clone().setY(e.height * 0.5), 0xffffff, e.height * 0.4, e.height, 0.4);
   }
 
   private spawnEnemy(type: EnemyType, pos: THREE.Vector3, hard = false, puppetId = 0) {
@@ -595,12 +651,14 @@ export class Game {
       listener: this.player,
       world: this.world,
       nav: this.nav,
+      navLarge: this.navLarge,
+      navHuge: this.navHuge,
       fx: this.fx,
       proj: this.proj,
       time: this.time,
       playerVisible: true,
       spawn: (type, pos) => {
-        this.spawnEnemy(type, pos);
+        this.spawnEnemy(type, this.validSpawnNear(pos, type, 8) ?? this.chooseSpawn(type));
         this.waves.onExtraSpawn();
       },
       shockwave: (pos) => {
@@ -1022,7 +1080,9 @@ export class Game {
   }
 
   private updateAmbient(dt: number) {
-    this.trainT += dt * 0.32;
+    // shared clock so every player sees the train in the same place
+    this.trainT = ((Date.now() / 1000) * 0.32) % (Math.PI * 2000);
+    void dt;
     const cars = this.room.train.userData.cars as THREE.Group[];
     cars.forEach((car, i) => {
       const t = this.trainT - i * 0.2;
@@ -1039,6 +1099,55 @@ export class Game {
     }
     attr.needsUpdate = true;
     if (this.muzzleLight) this.muzzleLight.intensity *= Math.max(0, 1 - dt * 30);
+  }
+
+  private trainHitCd = 0;
+  /** The toy train is solid: it shoves players and enemies off the track and hurts on impact. */
+  private trainCollide(dt: number) {
+    this.trainHitCd = Math.max(0, this.trainHitCd - dt);
+    const cars = this.room.train.userData.cars as THREE.Group[];
+    const inv = new THREE.Quaternion();
+    const local = new THREE.Vector3();
+    const hx = 1.75, hz = 2.9, top = 4.6;
+    const bodies: { pos: THREE.Vector3; vel: THREE.Vector3; r: number; y: number; hurt: (d: THREE.Vector3) => void }[] = [];
+    const pl = this.player;
+    if (pl.alive)
+      bodies.push({
+        pos: pl.pos, vel: pl.vel, r: pl.radius, y: pl.pos.y,
+        hurt: (d) => {
+          if (this.trainHitCd > 0) return;
+          this.trainHitCd = 1;
+          if (pl.damage(10, pl.pos.clone().sub(d))) {
+            audio.stomp();
+            this.hud.toast('CHOO CHOO! -10');
+          }
+        },
+      });
+    if (this.simulatesEnemies)
+      for (const e of this.enemies)
+        if (!e.dead && e.type !== 'boss')
+          bodies.push({ pos: e.pos, vel: e.vel, r: e.radius, y: e.pos.y, hurt: (d) => { if (Math.random() < dt * 4) this.damageEnemy(e, 10, d, 2); } });
+    for (const car of cars) {
+      inv.copy(car.quaternion).invert();
+      const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(car.quaternion);
+      for (const b of bodies) {
+        if (b.y > car.position.y + top - 0.3) continue;
+        local.subVectors(b.pos, car.position).setY(0).applyQuaternion(inv);
+        const px = hx + b.r - Math.abs(local.x);
+        const pz = hz + b.r - Math.abs(local.z);
+        if (px <= 0 || pz <= 0) continue;
+        // push out along the shallow axis (mostly sideways off the track)
+        if (px < pz) local.x += Math.sign(local.x || 1) * px;
+        else local.z += Math.sign(local.z || 1) * pz;
+        const world = local.applyQuaternion(car.quaternion).add(car.position);
+        const side = world.clone().sub(car.position).setY(0).normalize();
+        b.pos.x = world.x;
+        b.pos.z = world.z;
+        b.vel.addScaledVector(fwd, 6).addScaledVector(side, 9);
+        b.vel.y = Math.max(b.vel.y, 5);
+        b.hurt(side.clone().add(fwd).normalize());
+      }
+    }
   }
 
   private updatePlaying(dt: number) {
@@ -1068,6 +1177,8 @@ export class Game {
       this.navTimer = 0.3;
       const extra = this.targets().slice(1).filter((t) => t.alive).map((t) => ({ x: t.pos.x, z: t.pos.z }));
       this.nav.update(pl.pos.x, pl.pos.z, extra);
+      this.navLarge.update(pl.pos.x, pl.pos.z, extra);
+      if (this.boss) this.navHuge.update(pl.pos.x, pl.pos.z, extra);
     }
     for (let i = 0; i < this.spawnCooldown.length; i++) this.spawnCooldown[i] -= dt;
 
@@ -1085,6 +1196,7 @@ export class Game {
         ctx.player = best;
       } else ctx.player = this.player;
       e.update(dt, ctx);
+      if (e.needsRelocate && !e.puppet) this.relocate(e);
     }
     this.separate();
     const dead = this.enemies.filter((e) => e.dead);
@@ -1097,6 +1209,7 @@ export class Game {
     const kickers = [{ pos: pl.pos, vel: pl.vel, r: pl.radius }];
     for (const e of this.enemies) if (e.type !== 'bug') kickers.push({ pos: e.pos, vel: e.vel, r: e.radius });
     this.props.update(dt, kickers);
+    this.trainCollide(dt);
     this.pickups.update(dt, pl.pos, (k: PickupKind) => this.collect(k));
     this.updateShockwaves(dt);
 

@@ -60,10 +60,10 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
 
   // baseboards
   const bb = 0xf7f3ea;
-  b.box('painted', bb, -RX, RX, 0, 9, -RZ, -RZ + 1.6, 0.4, { ao: 0.3 });
-  b.box('painted', bb, -RX, RX, 0, 9, RZ - 1.6, RZ, 0.4, { ao: 0.3 });
-  b.box('painted', bb, -RX, -RX + 1.6, 0, 9, -RZ, RZ, 0.4, { ao: 0.3 });
-  b.box('painted', bb, RX - 1.6, RX, 0, 9, -RZ, RZ, 0.4, { ao: 0.3 });
+  b.box('painted', bb, -RX, RX, 0, 9, -RZ, -RZ + 1.6, 0.4, { ao: 0.3, collide: true });
+  b.box('painted', bb, -RX, RX, 0, 9, RZ - 1.6, RZ, 0.4, { ao: 0.3, collide: true });
+  b.box('painted', bb, -RX, -RX + 1.6, 0, 9, -RZ, RZ, 0.4, { ao: 0.3, collide: true });
+  b.box('painted', bb, RX - 1.6, RX, 0, 9, -RZ, RZ, 0.4, { ao: 0.3, collide: true });
 
   // window frame, sill, mullions
   const frame = 0xfbf8f2;
@@ -174,10 +174,10 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
       b.box('painted', red, x, x + 3, 1.5, 43, z, z + 3, 0.8, { collide: true });
       b.box('rubber', 0x222222, x - 0.2, x + 3.2, 0, 1.5, z - 0.2, z + 3.2, 0.3);
     }
-    b.box('painted', red, -18, -15, 46, 92, 15, 18, 0.8);
-    b.box('painted', red, 15, 18, 46, 92, 15, 18, 0.8);
-    b.box('painted', 0xffcf33, -19, 19, 66, 90, 15.5, 18.5, 1.5);
-    b.box('painted', red, -16, 16, 20, 23, -15, -12, 0.6);
+    b.box('painted', red, -18, -15, 46, 92, 15, 18, 0.8, { collide: true });
+    b.box('painted', red, 15, 18, 46, 92, 15, 18, 0.8, { collide: true });
+    b.box('painted', 0xffcf33, -19, 19, 66, 90, 15.5, 18.5, 1.5, { collide: true });
+    b.box('painted', red, -16, 16, 20, 23, -15, -12, 0.6, { collide: true });
   });
 
   // ------------------------------------------------------------------ bed (back-right)
@@ -191,6 +191,8 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
   b.mesh(new THREE.BoxGeometry(102, 3, 150), quiltMat, [80, 45.5, 8], [0, 0, 0], { collide: true });
   b.mesh(new THREE.BoxGeometry(2, 16, 150), quiltMat, [28.5, 39, 8], [0, 0, 0.05]);
   b.mesh(new THREE.BoxGeometry(102, 16, 2), quiltMat, [80, 39, 83.5], [0.05, 0, 0]);
+  b.collider(27.5, 30, 31, 47, -67, 83);
+  b.collider(29, 131, 31, 47, 82, 84.5);
   // pillow
   b.box('fabric', 0xffffff, 40, 120, 44, 56, -112, -82, 6, { collide: true });
   // headboard
@@ -222,8 +224,11 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
     const mid = top.clone().add(bot).multiplyScalar(0.5);
     b.with([mid.x, mid.y, mid.z], [0, 0, ang], () => {
       b.box('glossy', 0xff8a1f, -len / 2 - 2, len / 2 + 2, -0.8, 0, -7, 7, 0.3, { ao: 0 });
-      b.box('glossy', 0xff8a1f, -len / 2 - 2, len / 2 + 2, 0, 1.6, -7, -6, 0.3, { ao: 0 });
-      b.box('glossy', 0xff8a1f, -len / 2 - 2, len / 2 + 2, 0, 1.6, 6, 7, 0.3, { ao: 0 });
+      // side walls so you can't slip off
+      b.box('glossy', 0xff8a1f, -len / 2 - 2, len / 2 + 2, -0.8, 5, -7.6, -6.2, 0.5, { ao: 0 });
+      b.box('glossy', 0xff8a1f, -len / 2 - 2, len / 2 + 2, -0.8, 5, 6.2, 7.6, 0.5, { ao: 0 });
+      b.box('glossy', 0xffcf33, -len / 2 - 2, len / 2 + 2, 5, 5.8, -7.8, -6, 0.4, { ao: 0 });
+      b.box('glossy', 0xffcf33, -len / 2 - 2, len / 2 + 2, 5, 5.8, 6, 7.8, 0.4, { ao: 0 });
       for (let i = -4; i <= 4; i++) b.box('painted', 0xffffff, i * 11 - 0.6, i * 11 + 0.6, 0, 0.15, -0.6, 0.6, 0, { ao: 0 });
     });
     // support stack of books under the ramp middle
@@ -234,9 +239,18 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
       const h = sy / 3;
       b.box('painted', c, sx - 5 + i * 0.3, sx + 5 - i * 0.3, i * h, (i + 1) * h - 0.3, -16 + i, 0 - i, 0.8, { collide: true });
     });
+    // wall colliders following the slope (world units)
+    const segs = 30;
+    for (let i = 0; i < segs; i++) {
+      const xa = bot.x + (dx * i) / segs, xb = bot.x + (dx * (i + 1)) / segs;
+      const ya = bot.y + (dy * i) / segs, yb = bot.y + (dy * (i + 1)) / segs;
+      for (const [z0, z1] of [[top.z - 7.8, top.z - 6.2], [top.z + 6.2, top.z + 7.8]]) {
+        world.add(xa * CM, Math.max(0, ya - 1) * CM, z0 * CM, xb * CM, (yb + 5.8) * CM, z1 * CM);
+      }
+    }
     // smooth sloped walking surface (world units)
     world.addRamp({
-      minX: bot.x * CM, maxX: top.x * CM, minZ: (top.z - 7) * CM, maxZ: (top.z + 7) * CM,
+      minX: bot.x * CM, maxX: top.x * CM, minZ: (top.z - 6.2) * CM, maxZ: (top.z + 6.2) * CM,
       axis: 'x', u0: bot.x * CM, u1: top.x * CM, h0: bot.y * CM, h1: top.y * CM, thick: 1.2 * CM,
     });
   }
@@ -291,7 +305,7 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
     b.box('rubber', 0x1a1a1a, x0 + 3, x1 - 3, 44.9, 45.2, z0 + 3, z1 - 3, 0);
     // lid open against wall
     b.with([0, 45, z1], [1.45, 0, 0], () => {
-      b.box('wood', 0xd64c3f, x0, x1, 0, 3, -38, 0, 1.5);
+      b.box('wood', 0xd64c3f, x0, x1, 0, 3, -38, 0, 1.5, { collide: true });
       b.box('painted', 0xffcf33, x0 + 6, x1 - 6, 3, 3.5, -32, -6, 0.5);
     });
     const starMat = mats.textured('sticker-star', () => T.stickerTex('star'), { transparent: true, roughness: 0.4, alphaTest: 0.5 });
@@ -331,7 +345,7 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
     m.rotation.y = -0.2;
     m.castShadow = m.receiveShadow = true;
     b.group.add(m);
-    world.addFromObject(m);
+    b.with([0, 0, -108], [0, -0.2, 0], () => b.collider(-10, 10, 0, 30, -3.5, 3.5));
   }
 
   // ------------------------------------------------------------------ board game + sneakers (front-right)
@@ -345,7 +359,7 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
     m.rotation.y = 0.18;
     m.castShadow = m.receiveShadow = true;
     b.group.add(m);
-    world.addFromObject(m);
+    b.with([74, 0, 102], [0, 0.18, 0], () => b.collider(-16, 16, 0, 4, -16, 16));
     sneaker(b, [104, 0, 103], [0, 0.1, 0]);
     sneaker(b, [121, 0, 100], [0, -0.25, 0]);
   }
@@ -361,7 +375,6 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
 
   // ------------------------------------------------------------------ plush slumped by bookshelf
   plush(b, [-118, 0, 66], [0, 1.0, 0], 1, 0x9a7ad6);
-  world.add(-133 * CM, 0, 54 * CM, -102 * CM, 32 * CM, 78 * CM);
 
   // ------------------------------------------------------------------ rug / play mat
   {
@@ -390,7 +403,7 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
         }
       }
     // arch over gate
-    b.box('wood', 0xf2c84b, cx + 10, cx + 15, 10, 13, cz - 5, cz + 5, 0.5);
+    b.box('wood', 0xf2c84b, cx + 10, cx + 15, 10, 13, cz - 5, cz + 5, 0.5, { collide: true });
     // finished tower
     b.part(new THREE.CylinderGeometry(4.5, 4.5, 24, 16), 'wood', 0xe8c48a, [cx - 15, 12, cz - 15]);
     b.part(new THREE.ConeGeometry(6, 9, 16), 'glossy', 0xd64c3f, [cx - 15, 28.5, cz - 15]);
@@ -438,12 +451,12 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
   const crayon = (x: number, z: number, rotY: number, col: number) =>
     b.with([x, 1.25, z], [0, rotY, Math.PI / 2], () => {
       b.part(new THREE.CylinderGeometry(1.25, 1.25, 9, 12), 'painted', col, [0, 0, 0], [0, 0, 0], { ao: 0.2 });
+      b.collider(-1.3, 1.3, -4.5, 7, -1.3, 1.3);
       b.part(new THREE.CylinderGeometry(1.3, 1.3, 6, 12), 'paper', 0xfaf3e0, [0, -0.5, 0], [0, 0, 0], { ao: 0.2 });
       b.part(new THREE.ConeGeometry(1.25, 2.5, 12), 'painted', col, [0, 5.75, 0], [0, 0, 0], { ao: 0.2 });
     });
   ([[-10, 40, 0.4, 0xff4d3d], [-14, 44, 1.2, 0x3fa9ff], [35, 10, 2.2, 0x7bd35a], [-55, 60, 0.9, 0xffcf33], [-80, -20, 2.5, 0x9b59d0], [15, 65, -0.3, 0xff8a1f], [-45, -10, 1.9, 0xff6fa8]] as const)
     .forEach(([x, z, r, c]) => crayon(x, z, r, c));
-  world.add(-14 * CM, 0, 36 * CM, -6 * CM, 2.5 * CM, 48 * CM);
 
   // pencil
   b.with([28, 0.5, -65], [0, 0.5, Math.PI / 2], () => {
@@ -456,12 +469,12 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
   const battery = (x: number, z: number, r: number) =>
     b.with([x, 1.7, z], [0, r, Math.PI / 2], () => {
       b.part(new THREE.CylinderGeometry(1.7, 1.7, 5.4, 18), 'metal', 0x222222, [0, -0.6, 0]);
+      b.collider(-1.7, 1.7, -3.3, 3.5, -1.7, 1.7);
       b.part(new THREE.CylinderGeometry(1.71, 1.71, 2.6, 18), 'glossy', 0xd8b25a, [0, 1.6, 0]);
       b.part(new THREE.CylinderGeometry(0.5, 0.5, 0.6, 10), 'metal', 0xcccccc, [0, 3.2, 0]);
     }, 1);
   battery(-80, -45, 0.3);
   battery(-76, -40, 1.1);
-  world.add(-85 * CM, 0, -50 * CM, -71 * CM, 3.4 * CM, -35 * CM);
   // paper plane
   b.with([0, 0.2, -22], [0, 0.7, 0], () => {
     const g = new THREE.BufferGeometry();
@@ -621,6 +634,10 @@ function plush(b: Builder, pos: [number, number, number], rot: [number, number, 
   b.push(pos, rot, s);
   const f = 'fabric' as const;
   b.part(new THREE.SphereGeometry(13, 18, 14), f, col, [0, 13, 0], [0, 0, 0]);
+  // body + head + legs
+  b.collider(-13, 13, 0, 26, -12, 13);
+  b.collider(-10, 10, 22, 42, -9, 11);
+  b.collider(-11, 11, 0, 10, 4, 23);
   b.part(new THREE.SphereGeometry(9, 12, 10), f, 0xf5e3c8, [0, 12, 8]);
   b.part(new THREE.SphereGeometry(10, 18, 14), f, col, [0, 32, 1]);
   b.part(new THREE.SphereGeometry(4.5, 12, 10), f, 0xf5e3c8, [0, 30, 10]);
@@ -659,6 +676,7 @@ function dino(b: Builder) {
 function sock(b: Builder, pos: [number, number, number], rotY: number, col: number) {
   b.with(pos, [0, rotY, 0], () => {
     b.part(new THREE.CapsuleGeometry(3.5, 16, 4, 10), 'fabric', col, [0, 2.6, 0], [Math.PI / 2, 0, 0.0], { ao: 0.4 });
+    b.collider(-3.4, 7, 0, 5.5, -11.5, 12);
     b.part(new THREE.CapsuleGeometry(3.3, 7, 4, 10), 'fabric', col, [3.5, 2.4, 10], [0, 0, Math.PI / 2], { ao: 0.4 });
     b.part(new THREE.CylinderGeometry(3.7, 3.7, 3, 12), 'fabric', 0xffffff, [0, 2.6, -9], [Math.PI / 2, 0, 0], { ao: 0.4 });
     b.part(new THREE.SphereGeometry(3.4, 10, 8), 'fabric', 0xff4d3d, [6.5, 2.4, 10.5], [0, 0, 0], { ao: 0.4 });
@@ -688,6 +706,7 @@ function truck(b: Builder) {
   b.box('glossy', y, -18, -16.5, 9, 18, -8, 8, 0.8);
   b.box('glossy', 0xff4d3d, 17, 18, 8, 11, -5, 5, 0.6);
   b.collider(-18, 3, 0, 18, -8, 8);
+  b.collider(-15.5, 15.5, 0, 8.5, -9.2, 9.2); // wheels
   for (const x of [-11, 11])
     for (const z of [-7.5, 7.5]) {
       b.part(new THREE.CylinderGeometry(4.2, 4.2, 3, 20), 'rubber', 0x1f1f22, [x, 4.2, z], [Math.PI / 2, 0, 0]);
