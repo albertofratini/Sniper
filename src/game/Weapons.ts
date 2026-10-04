@@ -20,14 +20,26 @@ export interface WeaponDef {
   range: number;
   tracer: number;
   rocket?: boolean;
+  sniper?: boolean;
+  /** seconds of barrel spin before firing (minigun) */
+  spin?: number;
   speedMul: number;
+  /** how far forward the muzzle sits (for tracers / rockets) */
+  reach: number;
+  sound: 'blaster' | 'shotgun' | 'rocket' | 'sniper' | 'minigun';
 }
 
 export const WEAPONS: WeaponDef[] = [
-  { name: 'ASSAULT BLASTER', mag: 32, reserve: Infinity, rate: 0.088, damage: 12, pellets: 1, spread: 0.011, auto: true, reload: 1.3, recoil: 0.011, range: 220, tracer: 0x6fe8ff, speedMul: 1 },
-  { name: 'CHUNK SHOTGUN', mag: 6, reserve: 24, rate: 0.78, damage: 11, pellets: 10, spread: 0.075, auto: true, reload: 1.6, recoil: 0.065, range: 70, tracer: 0xffd27a, speedMul: 0.97 },
-  { name: 'FOAM ROCKET LAUNCHER', mag: 3, reserve: 9, rate: 0.95, damage: 140, pellets: 1, spread: 0, auto: true, reload: 2.0, recoil: 0.08, range: 300, tracer: 0xff8a1f, rocket: true, speedMul: 0.9 },
+  { name: 'ASSAULT BLASTER', mag: 32, reserve: Infinity, rate: 0.088, damage: 12, pellets: 1, spread: 0.011, auto: true, reload: 1.3, recoil: 0.011, range: 220, tracer: 0x6fe8ff, speedMul: 1, reach: 0.45, sound: 'blaster' },
+  { name: 'CHUNK SHOTGUN', mag: 6, reserve: 24, rate: 0.78, damage: 11, pellets: 10, spread: 0.075, auto: true, reload: 1.6, recoil: 0.065, range: 70, tracer: 0xffd27a, speedMul: 0.97, reach: 0.45, sound: 'shotgun' },
+  { name: 'FOAM ROCKET LAUNCHER', mag: 3, reserve: 9, rate: 0.95, damage: 140, pellets: 1, spread: 0, auto: true, reload: 2.0, recoil: 0.08, range: 300, tracer: 0xff8a1f, rocket: true, speedMul: 0.9, reach: 0.55, sound: 'rocket' },
+  { name: 'SNAP SNIPER', mag: 5, reserve: 20, rate: 1.05, damage: 105, pellets: 1, spread: 0.07, auto: false, reload: 2.1, recoil: 0.1, range: 420, tracer: 0xfff6c8, sniper: true, speedMul: 0.93, reach: 0.75, sound: 'sniper' },
+  { name: 'TOY MINIGUN', mag: 160, reserve: 0, rate: 0.045, damage: 9, pellets: 1, spread: 0.032, auto: true, reload: 3, recoil: 0.006, range: 180, tracer: 0xff6fa8, spin: 0.4, speedMul: 0.8, reach: 0.5, sound: 'minigun' },
 ];
+export const SNIPER = 3;
+export const MINIGUN = 4;
+/** Weapons you start a survival run with (the minigun is a pickup). */
+export const DEFAULT_OWNED = [true, true, true, true, false];
 
 export interface FireContext {
   hitscan(origin: THREE.Vector3, dir: THREE.Vector3, range: number, damage: number, tracerColor: number, muzzle: THREE.Vector3, pelletIndex: number): void;
@@ -44,6 +56,8 @@ interface Viewmodel {
   rocketTip?: THREE.Object3D;
   glow?: THREE.MeshStandardMaterial;
   drum?: THREE.Object3D;
+  spinner?: THREE.Object3D;
+  bolt?: THREE.Object3D;
   rest: THREE.Vector3;
 }
 
@@ -68,6 +82,15 @@ export class WeaponSystem {
   private swayVel = new THREE.Vector2();
   private meleeT = 0;
   private triggerHeld = false;
+  /** 0..1 aim-down-sights blend */
+  adsT = 0;
+  owned = [...DEFAULT_OWNED];
+  /** restrict to these weapon indices (multiplayer modes), null = any owned */
+  allowed: number[] | null = null;
+  private spinT = 0;
+  infiniteAmmo = false;
+  /** called on every shot (for multiplayer replication) */
+  onShot: (weapon: number) => void = () => {};
   shotsFired = 0;
   lastFireTime = 0;
   onAmmoChange: () => void = () => {};
@@ -87,7 +110,7 @@ export class WeaponSystem {
     this.scene.add(this.camera);
     this.camera.add(this.holder);
 
-    this.vms = [this.buildBlaster(), this.buildShotgun(), this.buildRocket()];
+    this.vms = [this.buildBlaster(), this.buildShotgun(), this.buildRocket(), this.buildSniper(), this.buildMinigun()];
     for (const vm of this.vms) {
       vm.root.visible = false;
       this.holder.add(vm.root);
@@ -108,18 +131,49 @@ export class WeaponSystem {
     return WEAPONS[this.current];
   }
 
-  reset() {
+  get scoped() {
+    return this.def.sniper === true && this.adsT > 0.85;
+  }
+
+  reset(allowed: number[] | null = null) {
     this.ammo = WEAPONS.map((w) => ({ mag: w.mag, reserve: w.reserve }));
+    this.owned = [...DEFAULT_OWNED];
+    this.allowed = allowed;
     this.state = 'idle';
     this.timer = 0;
     this.cooldown = 0;
-    this.switchTo(0, true);
+    this.adsT = 0;
+    this.switchTo(allowed ? allowed[0] : 0, true);
     this.onAmmoChange();
+  }
+
+  /** Multiplayer loadouts: only these weapons, all with full ammo. */
+  setLoadout(allowed: number[]) {
+    this.allowed = allowed;
+    for (const i of allowed) {
+      this.owned[i] = true;
+      this.ammo[i] = { mag: WEAPONS[i].mag, reserve: WEAPONS[i].reserve === 0 ? WEAPONS[i].mag * 2 : WEAPONS[i].reserve };
+    }
+    if (!allowed.includes(this.current)) this.switchTo(allowed[0], true);
+    this.onAmmoChange();
+  }
+
+  /** Pick up a weapon (e.g. the minigun crate). */
+  give(i: number) {
+    this.owned[i] = true;
+    this.ammo[i].mag = WEAPONS[i].mag;
+    if (this.allowed && !this.allowed.includes(i)) return;
+    this.switchTo(i);
+    this.onAmmoChange();
+  }
+
+  private usable(i: number) {
+    return this.owned[i] && (!this.allowed || this.allowed.includes(i)) && (this.ammo[i].mag > 0 || this.ammo[i].reserve > 0);
   }
 
   addAmmo(fraction: number) {
     WEAPONS.forEach((w, i) => {
-      if (w.reserve === Infinity) return;
+      if (w.reserve === Infinity || w.reserve === 0) return;
       const add = Math.max(1, Math.round(w.reserve * fraction));
       this.ammo[i].reserve = Math.min(w.reserve * 2, this.ammo[i].reserve + add);
     });
@@ -128,7 +182,9 @@ export class WeaponSystem {
 
   switchTo(i: number, instant = false) {
     if (i === this.current && !instant) return;
+    this.spinT = 0;
     if (instant) {
+      this.pending = -1;
       this.vms.forEach((v, k) => (v.root.visible = k === i));
       this.current = i;
       this.state = 'idle';
@@ -150,8 +206,9 @@ export class WeaponSystem {
   private muzzleWorld(player: Player) {
     const vm = this.vms[this.current];
     const off = vm.rest.clone();
-    off.z -= this.current === 2 ? 0.55 : 0.45;
+    off.z -= this.def.reach;
     off.y += 0.04;
+    if (this.scoped) off.set(0, -0.05, -0.4);
     return player.camera.localToWorld(off.multiplyScalar(1.4));
   }
 
@@ -162,8 +219,16 @@ export class WeaponSystem {
 
     // ---- input: switching
     if (player.alive) {
-      if (input.slot >= 0 && input.slot !== this.current) this.switchTo(input.slot);
-      else if (input.swap !== 0) this.switchTo((this.current + input.swap + WEAPONS.length) % WEAPONS.length);
+      if (input.slot >= 0 && input.slot < WEAPONS.length && input.slot !== this.current && this.owned[input.slot] && (!this.allowed || this.allowed.includes(input.slot))) this.switchTo(input.slot);
+      else if (input.swap !== 0) {
+        for (let k = 1; k < WEAPONS.length; k++) {
+          const n = (this.current + input.swap * k + WEAPONS.length * 2) % WEAPONS.length;
+          if (this.usable(n)) {
+            this.switchTo(n);
+            break;
+          }
+        }
+      }
     }
 
     // ---- state machine
@@ -192,6 +257,15 @@ export class WeaponSystem {
       if (this.timer <= 0) this.state = 'idle';
     }
 
+    // aim down sights (sniper scope)
+    const wantAds = player.alive && input.aim && this.def.sniper === true && (this.state === 'idle' || this.state === 'melee');
+    this.adsT = Math.max(0, Math.min(1, this.adsT + (wantAds ? dt * 7 : -dt * 9)));
+    // minigun spin-up
+    if (this.def.spin) this.spinT = input.fire && this.state === 'idle' && player.alive ? Math.min(this.def.spin + 0.2, this.spinT + dt) : Math.max(0, this.spinT - dt * 1.5);
+    const spunUp = !this.def.spin || this.spinT >= this.def.spin;
+    // COD-mobile style: releasing the scope button fires
+    const releaseFire = input.aimRelease && this.def.sniper === true;
+
     if (player.alive && this.state === 'idle') {
       if (input.melee && this.cooldown <= 0.2) {
         this.state = 'melee';
@@ -208,16 +282,17 @@ export class WeaponSystem {
         void dir;
       } else if (input.reload && am.mag < def.mag && am.reserve > 0) {
         this.startReload();
-      } else if (input.fire && this.cooldown <= 0 && (def.auto || !this.triggerHeld)) {
+      } else if (((input.fire && (def.auto || !this.triggerHeld)) || releaseFire) && this.cooldown <= 0 && spunUp) {
         if (am.mag > 0) {
           this.fire(player, ctx, time);
+          if (releaseFire) this.adsT = 0;
         } else if (am.reserve > 0) {
           this.startReload();
         } else {
           audio.empty();
           this.cooldown = 0.3;
-          // auto-switch to blaster when empty
-          if (this.current !== 0) this.switchTo(0);
+          // auto-switch to something with ammo
+          for (let k = 0; k < WEAPONS.length; k++) if (k !== this.current && this.usable(k)) { this.switchTo(k); break; }
         }
       }
     }
@@ -236,8 +311,9 @@ export class WeaponSystem {
   private fire(player: Player, ctx: FireContext, time: number) {
     const def = this.def;
     const am = this.ammo[this.current];
-    am.mag--;
+    if (!this.infiniteAmmo) am.mag--;
     this.cooldown = def.rate;
+    this.onShot(this.current);
     this.shotsFired++;
     this.lastFireTime = time;
     const origin = player.camera.getWorldPosition(new THREE.Vector3());
@@ -250,7 +326,8 @@ export class WeaponSystem {
       ctx.fireRocket(muzzle, dir);
       audio.rocket();
     } else {
-      const spreadBase = def.spread * (1 + moving * (def.pellets > 1 ? 0.2 : 1.6) + (player.grounded ? 0 : 0.8)) * (player.crouching ? 0.6 : 1);
+      let spreadBase = def.spread * (1 + moving * (def.pellets > 1 ? 0.2 : 1.6) + (player.grounded ? 0 : 0.8)) * (player.crouching ? 0.6 : 1);
+      if (def.sniper) spreadBase = this.adsT > 0.85 ? 0.0012 + moving * 0.01 : def.spread * (0.6 + moving * 0.8) * (player.grounded ? 1 : 1.6);
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(player.camera.quaternion);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(player.camera.quaternion);
       for (let i = 0; i < def.pellets; i++) {
@@ -259,12 +336,12 @@ export class WeaponSystem {
         const d = fwd.clone().addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
         ctx.hitscan(origin, d, def.range, def.damage, def.tracer, muzzle, i);
       }
-      if (this.current === 0) audio.blaster(); else audio.shotgun();
+      audio.weapon(def.sound);
     }
-    ctx.muzzleFlash(muzzle, this.current === 0 ? 0x8ff0ff : 0xffc060, this.current === 1 ? 2.2 : 1.4);
+    ctx.muzzleFlash(muzzle, this.current === 0 ? 0x8ff0ff : this.current === MINIGUN ? 0xff9fd0 : 0xffc060, this.current === 1 ? 2.2 : this.current === MINIGUN ? 1.0 : 1.4);
     player.addRecoil(def.recoil, def.recoil * 0.8);
-    player.shake(this.current === 0 ? 0.04 : 0.22);
-    this.kickVel += this.current === 0 ? 2.2 : 6;
+    player.shake(this.current === 0 || this.current === MINIGUN ? 0.03 : 0.22);
+    this.kickVel += this.current === 0 || this.current === MINIGUN ? 1.6 : 6;
     this.flashTime = 0.05;
     this.flash.rotation.z = Math.random() * Math.PI;
     this.onAmmoChange();
@@ -332,6 +409,21 @@ export class WeaponSystem {
       p.y -= 0.4;
       rx -= 0.8;
     }
+    // ADS: bring the scope to the eye
+    if (this.adsT > 0) {
+      const k = this.adsT * this.adsT;
+      p.x += (0 - p.x) * k;
+      p.y += (-0.16 - p.y) * k;
+      rx *= 1 - k;
+      ry *= 1 - k;
+      rz *= 1 - k;
+    }
+    vm.root.visible = !this.scoped;
+    if (vm.spinner) vm.spinner.rotation.z += dt * (this.spinT / (this.def.spin ?? 1)) * 40;
+    if (vm.bolt) {
+      const t = Math.max(0, Math.min(1, (this.def.rate - this.cooldown) / this.def.rate));
+      vm.bolt.position.z = 0.05 + (t > 0.2 && t < 0.8 ? Math.sin(((t - 0.2) / 0.6) * Math.PI) * 0.09 : 0);
+    }
 
     vm.root.position.copy(p);
     vm.root.rotation.set(rx, ry, rz);
@@ -352,9 +444,10 @@ export class WeaponSystem {
       const mw = vm.muzzle.getWorldPosition(new THREE.Vector3());
       this.camera.worldToLocal(mw);
       this.flash.position.copy(mw);
-      const s = (this.current === 1 ? 0.32 : this.current === 2 ? 0.36 : 0.2) * (0.8 + Math.random() * 0.4);
+      const s = (this.current === 1 ? 0.32 : this.current === 2 ? 0.36 : this.current === SNIPER ? 0.3 : 0.2) * (0.8 + Math.random() * 0.4);
       this.flash.scale.set(s, s, s);
-      (this.flash.material as THREE.MeshBasicMaterial).color.setHex(this.current === 0 ? 0xa8f4ff : 0xffd080);
+      (this.flash.material as THREE.MeshBasicMaterial).color.setHex(this.current === 0 ? 0xa8f4ff : this.current === MINIGUN ? 0xffb0e0 : 0xffd080);
+      this.flash.visible = !this.scoped;
     } else this.flash.visible = false;
   }
 
@@ -511,6 +604,77 @@ export class WeaponSystem {
     this.arms(root, new THREE.Vector3(0, -0.09, 0.08), new THREE.Vector3(-0.05, -0.04, -0.3));
     root.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).renderOrder = 1; });
     return { root, muzzle, rocketTip: tip, rest: new THREE.Vector3(0.25, -0.27, -0.56) };
+  }
+
+  private buildSniper(): Viewmodel {
+    const root = new THREE.Group();
+    const navy = this.mats.plastic(0x24345e, 0.35);
+    const orange = this.mats.plastic(0xff8a1f, 0.32);
+    const dark = this.mats.plastic(0x1e2028, 0.5);
+    const tip = this.mats.plastic(0xff5a00, 0.5);
+    const glass = new THREE.MeshStandardMaterial({ color: 0x0a1830, emissive: 0x3fa9ff, emissiveIntensity: 0.8, roughness: 0.05, metalness: 0.3 });
+    const w = new THREE.Group();
+    root.add(w);
+    this.part(rbox(0.075, 0.1, 0.5, 0.025), navy, [0, 0.0, -0.12], w);
+    this.part(rbox(0.08, 0.035, 0.3, 0.012), orange, [0, -0.06, -0.2], w);
+    this.part(new THREE.CylinderGeometry(0.018, 0.022, 0.5, 14), dark, [0, 0.025, -0.6], w, [Math.PI / 2, 0, 0]);
+    this.part(new THREE.CylinderGeometry(0.03, 0.03, 0.05, 14), tip, [0, 0.025, -0.86], w, [Math.PI / 2, 0, 0]);
+    for (let i = 0; i < 2; i++) this.part(new THREE.TorusGeometry(0.024, 0.006, 6, 14), orange, [0, 0.025, -0.45 - i * 0.15], w);
+    // scope
+    this.part(new THREE.CylinderGeometry(0.03, 0.03, 0.26, 18), dark, [0, 0.1, -0.12], w, [Math.PI / 2, 0, 0]);
+    this.part(new THREE.CylinderGeometry(0.042, 0.032, 0.06, 18), dark, [0, 0.1, -0.27], w, [Math.PI / 2, 0, 0]);
+    this.part(new THREE.CircleGeometry(0.038, 18), glass, [0, 0.1, -0.301], w, [0, Math.PI, 0]);
+    this.part(rbox(0.02, 0.04, 0.03, 0.006), dark, [0, 0.06, -0.06], w);
+    this.part(rbox(0.02, 0.04, 0.03, 0.006), dark, [0, 0.06, -0.18], w);
+    // mag + grip + stock
+    this.part(rbox(0.05, 0.08, 0.07, 0.015), orange, [0, -0.08, -0.14], w);
+    this.part(rbox(0.055, 0.15, 0.07, 0.02), dark, [0, -0.09, 0.07], w, [0.3, 0, 0]);
+    this.part(rbox(0.07, 0.1, 0.2, 0.03), navy, [0, -0.01, 0.22], w);
+    this.part(rbox(0.072, 0.03, 0.12, 0.012), orange, [0, 0.045, 0.2], w);
+    const bolt = new THREE.Group();
+    bolt.position.set(0.045, 0.03, 0.05);
+    w.add(bolt);
+    this.part(new THREE.CylinderGeometry(0.008, 0.008, 0.05, 8), dark, [0.02, 0, 0], bolt, [0, 0, Math.PI / 2]);
+    this.part(new THREE.SphereGeometry(0.015, 10, 8), orange, [0.045, 0, 0], bolt);
+    this.sticker('bolt', 0.022, [-0.0382, 0.0, -0.05], -Math.PI / 2, w);
+    this.screws(w, [[-0.0385, -0.03, -0.3], [-0.0385, 0.03, -0.3], [-0.0385, -0.03, 0.15]], 1);
+    const muzzle = new THREE.Object3D();
+    muzzle.position.set(0, 0.025, -0.9);
+    w.add(muzzle);
+    this.arms(root, new THREE.Vector3(0, -0.11, 0.08), new THREE.Vector3(-0.04, -0.05, -0.36));
+    root.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).renderOrder = 1; });
+    return { root, muzzle, bolt, rest: new THREE.Vector3(0.2, -0.22, -0.5) };
+  }
+
+  private buildMinigun(): Viewmodel {
+    const root = new THREE.Group();
+    const pink = this.mats.plastic(0xff6fa8, 0.3);
+    const yellow = this.mats.plastic(0xffcf33, 0.3);
+    const dark = this.mats.plastic(0x2a2d36, 0.5);
+    const teal = this.mats.plastic(0x2fb3b3, 0.3);
+    const w = new THREE.Group();
+    root.add(w);
+    this.part(rbox(0.15, 0.15, 0.3, 0.04), pink, [0, 0, -0.05], w);
+    const spinner = new THREE.Group();
+    spinner.position.set(0, 0.0, -0.35);
+    w.add(spinner);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      this.part(new THREE.CylinderGeometry(0.016, 0.016, 0.42, 10), i % 2 ? teal : dark, [Math.cos(a) * 0.04, Math.sin(a) * 0.04, -0.05], spinner, [Math.PI / 2, 0, 0]);
+    }
+    this.part(new THREE.TorusGeometry(0.06, 0.012, 8, 18), yellow, [0, 0, 0.05], spinner);
+    this.part(new THREE.TorusGeometry(0.06, 0.012, 8, 18), yellow, [0, 0, -0.24], spinner);
+    this.part(new THREE.CylinderGeometry(0.075, 0.075, 0.09, 18), yellow, [0, -0.11, 0.0], w, [0, 0, Math.PI / 2]);
+    for (let i = 0; i < 6; i++) this.part(new THREE.CylinderGeometry(0.009, 0.009, 0.03, 6), yellow, [0.05, -0.08 + i * 0.02, -0.02 + i * 0.01], w, [0, 0, Math.PI / 2]);
+    this.part(rbox(0.04, 0.05, 0.16, 0.015), dark, [0, 0.11, -0.05], w);
+    this.part(rbox(0.06, 0.15, 0.07, 0.02), dark, [0, -0.08, 0.13], w, [0.3, 0, 0]);
+    this.sticker('star', 0.035, [-0.0755, 0.01, -0.05], -Math.PI / 2, w);
+    const muzzle = new THREE.Object3D();
+    muzzle.position.set(0, 0, -0.62);
+    w.add(muzzle);
+    this.arms(root, new THREE.Vector3(0, -0.1, 0.12), new THREE.Vector3(-0.07, 0.06, -0.08));
+    root.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).renderOrder = 1; });
+    return { root, muzzle, spinner, rest: new THREE.Vector3(0.22, -0.26, -0.48) };
   }
 }
 

@@ -10,21 +10,25 @@ import { CollisionWorld, NavGrid, RayHit } from './Collision';
 import { Input } from './Input';
 import { MobileControls } from './MobileControls';
 import { Player } from './Player';
-import { WeaponSystem, FireContext, WEAPONS } from './Weapons';
+import { WeaponSystem, FireContext, WEAPONS, SNIPER, MINIGUN } from './Weapons';
 import { Effects } from './Effects';
 import { Projectiles, Projectile, ProjectileHooks } from './Projectiles';
-import { Enemy, EnemyType, EnemyCtx, createEnemy, debris, Boss } from './Enemies';
+import { Enemy, EnemyType, EnemyCtx, createEnemy, debris, Boss, Target } from './Enemies';
 import { WaveManager, WAVES } from './WaveManager';
 import { DynamicProps, Pickups, PickupKind } from './Props';
+import { MODES, ModeId } from './Modes';
 import { HUD } from '../ui/HUD';
 import { audio } from './Audio';
+import type { Session } from '../net/Session';
+import type { RemoteAvatar } from '../net/RemotePlayers';
 
-type GameState = 'menu' | 'playing' | 'paused' | 'dying' | 'over';
+export type GameState = 'menu' | 'playing' | 'paused' | 'dying' | 'over' | 'mpover';
 
 interface Shockwave { pos: THREE.Vector3; r: number; hit: boolean; mesh: THREE.Mesh }
 
 const tmpHit: RayHit = { dist: 0, normal: new THREE.Vector3(), point: new THREE.Vector3(), box: null };
 const v1 = new THREE.Vector3();
+const MAX_NADES = 4;
 
 export class Game {
   readonly renderer: THREE.WebGLRenderer;
@@ -46,9 +50,13 @@ export class Game {
   enemies: Enemy[] = [];
   state: GameState = 'menu';
   lowEnd: boolean;
+  /** 'survival' = solo waves; otherwise a multiplayer mode */
+  mode: 'survival' | ModeId = 'survival';
+  mp: Session | null = null;
+  nades = { frag: 2, flash: 1 };
+  blind = 0;
 
   private composer: EffectComposer | null = null;
-  private bloom: UnrealBloomPass | null = null;
   private vmPass: RenderPass | null = null;
   private muzzleLight: THREE.PointLight | null = null;
   private lastFrame = performance.now();
@@ -59,17 +67,17 @@ export class Game {
   private shockwaves: Shockwave[] = [];
   private spawnCooldown: number[] = [];
   private pixelRatio = 1;
-  private maxPixelRatio = 1;
-  private frameAcc = 0;
-  private frameCount = 0;
-  private lastAdjust = 0;
   private stats = { kills: 0, shots: 0, hits: 0, time: 0, score: 0 };
   private onTarget = false;
   private trainT = 0;
   private menuT = 0;
   private boss: Boss | null = null;
   private victoryT = -1;
+  private enemyNetId = 1;
+  private shotEnds: THREE.Vector3[] = [];
+  private shotWeapon = -1;
   onStateChange: (s: GameState, info?: { victory: boolean; stats: Game['stats'] }) => void = () => {};
+  onPeerJoinedWhileSolo: ((name: string) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.input = new Input(canvas);
@@ -78,9 +86,10 @@ export class Game {
     if (params.has('high')) this.lowEnd = false;
     document.body.classList.toggle('is-touch', this.input.isTouch);
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !this.lowEnd, powerPreference: 'high-performance', stencil: false });
-    this.maxPixelRatio = Math.min(window.devicePixelRatio || 1, this.lowEnd ? 2 : 2);
-    this.pixelRatio = this.lowEnd ? Math.min(this.maxPixelRatio, 1.5) : this.maxPixelRatio;
+    // Always render at the device's native sharpness (capped at 2x: beyond that is invisible on phones but costs a lot).
+    const dpr = window.devicePixelRatio || 1;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: dpr < 2, powerPreference: 'high-performance', stencil: false });
+    this.pixelRatio = Math.min(dpr, 2);
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -91,11 +100,11 @@ export class Game {
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.info.autoReset = false;
 
-    // ---- scene, environment, lights
     this.scene.background = new THREE.Color(0xe9d8c4);
     this.scene.fog = new THREE.Fog(0xcdb497, 90, 330);
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
     this.scene.environment = env;
     this.scene.environmentIntensity = 0.32;
 
@@ -105,6 +114,12 @@ export class Game {
     this.scene.add(this.room.train);
     this.setupLights();
     this.nav = new NavGrid(this.world);
+    // make sure no spawn or pickup point sits inside furniture
+    const fix = (p: THREE.Vector3) => p.copy(this.freeSpot(p));
+    this.room.playerSpawns.forEach(fix);
+    this.room.spawnPoints.forEach(fix);
+    this.room.pickupSpots.forEach((sp) => fix(sp.pos));
+    fix(this.room.playerSpawn);
 
     const aspect = window.innerWidth / window.innerHeight;
     this.player = new Player(this.world, aspect);
@@ -112,14 +127,18 @@ export class Game {
     this.weapons = new WeaponSystem(this.mats, aspect, env);
     this.fx = new Effects(this.world, this.lowEnd);
     this.scene.add(this.fx.group);
-    this.fx.onShake((a) => {
-      this.player.shake(a);
-    });
+    this.fx.onShake((a) => this.player.shake(a));
     this.proj = new Projectiles(this.mats, this.world, this.fx);
     this.scene.add(this.proj.group);
+    this.proj.onSpawn = (p) => {
+      // co-op host shares enemy shots so everyone sees them
+      if (this.mp && this.mode === 'coop' && this.mp.isLeader && p.hostile && !p.ghost && (p.kind === 'dart' || p.kind === 'bolt' || p.kind === 'bomb'))
+        this.mp.sendEnemyProjectile(p.kind, p.pos, p.vel);
+    };
     this.props = new DynamicProps(this.mats, this.world, this.room.dynamicSpots);
     this.scene.add(this.props.group);
     this.pickups = new Pickups(this.mats, this.world);
+    this.pickups.onSpotTaken = (i) => this.mp?.sendPick(i);
     this.scene.add(this.pickups.group);
     debris.scene = this.scene;
     debris.world = this.world;
@@ -138,12 +157,14 @@ export class Game {
           const def = WAVES[i];
           this.hud.wave(i + 1, WAVES.length, i === WAVES.length - 1 ? 'FINAL WAVE' : undefined);
           this.hud.banner(def.title, def.sub, 2.6);
+          this.mp?.sendBanner(def.title, def.sub);
           audio.waveStart();
         },
         waveCleared: (i) => {
-          this.hud.banner('WAVE CLEARED!', `+25 HEALTH · AMMO RESTOCKED · WAVE ${i + 2} INCOMING`, 3.2);
-          this.player.heal(25);
-          this.weapons.addAmmo(0.5);
+          const sub = `HEALTH RESTORED · AMMO + GRENADES · WAVE ${i + 2} INCOMING`;
+          this.hud.banner('WAVE CLEARED!', sub, 3.2);
+          this.mp?.sendBanner('WAVE CLEARED!', sub);
+          this.waveReward();
           this.stats.score += 500 * (i + 1);
           audio.waveComplete();
         },
@@ -151,18 +172,19 @@ export class Game {
       },
     );
 
-    this.player.onDamage = (amount, from) => {
+    this.player.onDamage = (_amount, from) => {
       if (from) {
         const d = v1.subVectors(from, this.player.pos);
         const fwd = new THREE.Vector3(-Math.sin(this.player.yaw), 0, -Math.cos(this.player.yaw));
         const right = new THREE.Vector3(Math.cos(this.player.yaw), 0, -Math.sin(this.player.yaw));
         this.hud.hitDir(Math.atan2(d.dot(right), d.dot(fwd)));
       }
-      void amount;
     };
     this.weapons.onAmmoChange = () => this.updateWeaponHud();
+    this.weapons.onShot = (w) => {
+      this.shotWeapon = w;
+    };
 
-    // post-processing on capable devices
     if (!this.lowEnd) this.setupComposer();
 
     this.mobile = new MobileControls(this.input);
@@ -171,14 +193,46 @@ export class Game {
       if (!this.input.locked && this.state === 'playing' && !this.input.isTouch) this.pause();
     });
     window.addEventListener('resize', () => this.resize());
-    window.addEventListener('orientationchange', () => setTimeout(() => this.resize(), 200));
+    window.addEventListener('orientationchange', () => setTimeout(() => this.resize(), 250));
+    document.addEventListener('fullscreenchange', () => setTimeout(() => this.resize(), 100));
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && this.state === 'playing') this.pause();
+      // multiplayer matches keep running in the background
+      if (document.hidden && this.state === 'playing' && !this.inMatch) this.pause();
     });
     this.resize();
 
     this.renderer.shadowMap.needsUpdate = true;
     (window as unknown as { __game: Game }).__game = this;
+  }
+
+  private spotBlocked(p: THREE.Vector3, r: number) {
+    for (const b of this.world.query(p.x - r - 1, p.z - r - 1, p.x + r + 1, p.z + r + 1)) {
+      if (b.minY > 1.9 || b.maxY < 0.55) continue;
+      const cx = Math.max(b.minX, Math.min(p.x, b.maxX)), cz = Math.max(b.minZ, Math.min(p.z, b.maxZ));
+      if (Math.hypot(p.x - cx, p.z - cz) < r) return true;
+    }
+    return false;
+  }
+
+  /** Nearest floor position around p with room for a soldier. */
+  private freeSpot(p: THREE.Vector3) {
+    if (!this.spotBlocked(p, 1.0)) return p.clone();
+    for (let r = 1; r < 32; r += 0.75)
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2;
+        const q = new THREE.Vector3(p.x + Math.cos(a) * r, 0, p.z + Math.sin(a) * r);
+        if (Math.abs(q.x) > 82 || Math.abs(q.z) > 73) continue;
+        if (!this.spotBlocked(q, 1.0)) return q;
+      }
+    return p.clone();
+  }
+
+  get inMatch() {
+    return !!this.mp && !!this.mp.self.inMatch && this.mode !== 'survival';
+  }
+
+  get selfId() {
+    return this.mp?.self.id ?? 'me';
   }
 
   private setupLights() {
@@ -199,17 +253,17 @@ export class Game {
     s.normalBias = 0.06;
     s.radius = 3;
     this.scene.add(sun, sun.target);
-
-    const hemi = new THREE.HemisphereLight(0xc4d8ff, 0xb58258, 0.62);
+    // phones: one hemisphere fill instead of extra directional lights (cheaper per pixel)
+    const hemi = new THREE.HemisphereLight(0xc4d8ff, 0xb58258, this.lowEnd ? 0.95 : 0.62);
     this.scene.add(hemi);
-    // warm bounce from the sunlit floor, from the front of the room
-    const bounce = new THREE.DirectionalLight(0xffb48a, 0.4);
-    bounce.position.set(-20, 10, 80);
-    this.scene.add(bounce);
-    // cool skylight through the window
-    const sky = new THREE.DirectionalLight(0xa8c8ff, 0.45);
-    sky.position.set(30, 60, -90);
-    this.scene.add(sky);
+    if (!this.lowEnd) {
+      const bounce = new THREE.DirectionalLight(0xffb48a, 0.4);
+      bounce.position.set(-20, 10, 80);
+      this.scene.add(bounce);
+      const sky = new THREE.DirectionalLight(0xa8c8ff, 0.45);
+      sky.position.set(30, 60, -90);
+      this.scene.add(sky);
+    }
   }
 
   private setupComposer() {
@@ -223,42 +277,110 @@ export class Game {
     vm.clearDepth = true;
     composer.addPass(vm);
     this.vmPass = vm;
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.2, 0.4, 0.95);
-    composer.addPass(this.bloom);
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(w / 2, h / 2), 0.2, 0.4, 0.95));
     composer.addPass(new OutputPass());
     this.composer = composer;
   }
 
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
+    this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setSize(w, h, false);
     this.player.camera.aspect = w / h;
-    // keep a decent horizontal FOV in narrow landscape phones
     this.player.baseFov = w / h > 1.9 ? 70 : 75;
     this.player.camera.updateProjectionMatrix();
     this.weapons.resize(w / h);
+    this.composer?.setPixelRatio(this.pixelRatio);
     this.composer?.setSize(w, h);
     const portrait = this.input.isTouch && h > w;
     document.getElementById('rotate')!.classList.toggle('hidden', !portrait);
-    if (portrait && this.state === 'playing') this.pause();
+    if (portrait && this.state === 'playing' && !this.inMatch) this.pause();
   }
 
   // ------------------------------------------------------------------ flow
 
+  /** Solo survival. */
   start() {
     audio.init();
+    this.mode = 'survival';
     this.resetWorld();
+    this.weapons.reset();
+    this.nades = { frag: 2, flash: 1 };
+    this.player.regenDelay = 3.5;
+    this.player.regenRate = 14;
+    this.pickups.setSpots(this.room.pickupSpots);
+    this.pickups.clear();
+    this.player.spawn(this.room.playerSpawn, this.room.playerYaw);
+    this.beginPlay();
+    this.waves.start();
+  }
+
+  private beginPlay() {
     this.state = 'playing';
     this.hud.show(true);
     this.mobile.show(this.input.isTouch);
     this.input.enabled = true;
     this.input.lock();
-    this.waves.start();
+    this.updateWeaponHud();
     this.onStateChange('playing');
+  }
+
+  /** Called by the multiplayer session when a match begins (or we join one in progress). */
+  startMatch(s: Session) {
+    audio.init();
+    this.mp = s;
+    this.mode = s.match!.mode;
+    const def = MODES[this.mode];
+    this.resetWorld();
+    this.weapons.reset(s.loadout());
+    this.weapons.setLoadout(s.loadout());
+    this.nades = { frag: def.frags, flash: def.flashes };
+    this.player.regenDelay = this.mode === 'coop' ? 3.5 : 4;
+    this.player.regenRate = this.mode === 'coop' ? 14 : 20;
+    this.pickups.setSpots(this.room.pickupSpots.filter((p) => def.pickups.includes(p.kind)));
+    this.pickups.clear();
+    const sp = this.pickSpawn();
+    this.player.spawn(sp, Math.atan2(sp.x, sp.z));
+    this.beginPlay();
+    if (this.mode === 'coop') {
+      if (s.isLeader) this.waves.start();
+      this.hud.wave(1, WAVES.length);
+    } else {
+      this.hud.banner(def.name, def.blurb, 3);
+      audio.waveStart();
+    }
+  }
+
+  /** Match over: freeze and show results (session returns to the lobby after a few seconds). */
+  matchEnded() {
+    this.state = 'mpover';
+    this.input.reset();
+    this.mobile.show(false);
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.onStateChange('mpover');
+  }
+
+  stopMatch() {
+    this.resetWorld();
+    this.mode = 'survival';
+    this.state = 'menu';
+    this.input.enabled = false;
+    this.input.reset();
+    this.hud.show(false);
+    this.mobile.show(false);
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.onStateChange('menu');
   }
 
   pause() {
     if (this.state !== 'playing') return;
+    if (this.inMatch) {
+      // matches can't be paused; just release the mouse and show the menu overlay
+      this.state = 'paused';
+      this.input.reset();
+      this.onStateChange('paused');
+      return;
+    }
     this.state = 'paused';
     this.input.reset();
     this.mobile.show(false);
@@ -275,6 +397,19 @@ export class Game {
     this.onStateChange('playing');
   }
 
+  quitToMenu() {
+    if (this.inMatch) {
+      this.mp!.backToLobby();
+      return;
+    }
+    this.resetWorld();
+    this.state = 'menu';
+    this.input.enabled = false;
+    this.hud.show(false);
+    this.mobile.show(false);
+    this.onStateChange('menu');
+  }
+
   private resetWorld() {
     for (const e of this.enemies) e.dispose(this.scene);
     this.enemies = [];
@@ -286,16 +421,55 @@ export class Game {
     this.props.reset();
     for (const s of this.shockwaves) this.scene.remove(s.mesh);
     this.shockwaves = [];
-    this.player.spawn(this.room.playerSpawn, this.room.playerYaw);
     this.victoryT = -1;
     this.hitstop = 0;
-    this.weapons.reset();
+    this.blind = 0;
     this.hud.reset();
     this.stats = { kills: 0, shots: 0, hits: 0, time: 0, score: 0 };
     this.hud.health(100, 100);
     this.hud.score(0);
-    this.updateWeaponHud();
+    this.waves.state = 'done';
     this.nav.update(this.player.pos.x, this.player.pos.z);
+  }
+
+  private pickSpawn(): THREE.Vector3 {
+    const pts = this.room.playerSpawns;
+    if (!this.mp) return this.room.playerSpawn.clone();
+    const others = [...this.mp.avatars.values()].filter((a) => a.alive);
+    if (this.mode === 'coop') {
+      // spawn next to a teammate if possible
+      const mate = others[Math.floor(Math.random() * others.length)];
+      if (mate) return pts.slice().sort((a, b) => a.distanceTo(mate.pos) - b.distanceTo(mate.pos))[0].clone();
+      return this.room.playerSpawn.clone();
+    }
+    const foes = others.filter((a) => this.mp!.isEnemy(a.id));
+    let best = pts[Math.floor(Math.random() * pts.length)];
+    let bestD = -1;
+    for (const p of pts) {
+      const d = foes.length ? Math.min(...foes.map((f) => f.pos.distanceTo(p))) : Math.random() * 100;
+      if (d > bestD) { bestD = d; best = p; }
+    }
+    return best.clone();
+  }
+
+  respawnLocal() {
+    if (!this.inMatch) return;
+    const sp = this.pickSpawn();
+    this.player.spawn(sp, Math.atan2(-sp.x, -sp.z) + Math.PI);
+    this.player.invuln = 1.5;
+    this.weapons.setLoadout(this.mp!.loadout());
+    const def = MODES[this.mode as ModeId];
+    this.nades = { frag: Math.max(this.nades.frag, def.frags), flash: Math.max(this.nades.flash, def.flashes) };
+    this.state = 'playing';
+    this.mobile.show(this.input.isTouch);
+    this.hud.banner('BACK IN ACTION', '', 1.0);
+  }
+
+  private waveReward() {
+    this.player.heal(100);
+    this.weapons.addAmmo(0.5);
+    this.nades.frag = Math.min(MAX_NADES, this.nades.frag + 1);
+    this.nades.flash = Math.min(MAX_NADES, this.nades.flash + 1);
   }
 
   private victory() {
@@ -303,6 +477,10 @@ export class Game {
     audio.victory();
     for (let i = 0; i < 6; i++) this.fx.confetti(this.player.eyePos.add(new THREE.Vector3((Math.random() - 0.5) * 10, 2 + i, (Math.random() - 0.5) * 10)), 40);
     this.stats.score += Math.max(0, Math.round(this.player.health) * 20);
+    if (this.inMatch && this.mode === 'coop') {
+      this.mp!.coopEnd(true);
+      return;
+    }
     this.victoryT = 3.6;
   }
 
@@ -315,15 +493,26 @@ export class Game {
     this.onStateChange('over', { victory, stats: { ...this.stats } });
   }
 
-  // ------------------------------------------------------------------ spawning
+  // ------------------------------------------------------------------ enemies
+
+  private get simulatesEnemies() {
+    return this.mode === 'survival' || (this.mode === 'coop' && !!this.mp?.isLeader);
+  }
+
+  private targets(): Target[] {
+    const list: Target[] = [this.player];
+    if (this.inMatch && this.mode === 'coop') for (const a of this.mp!.avatars.values()) list.push(a);
+    return list;
+  }
 
   private spawnWaveEnemy(type: EnemyType, hard: boolean) {
     let pos: THREE.Vector3;
     if (type === 'boss') {
       pos = this.room.bossSpawn.clone();
     } else {
+      const ts = this.targets().filter((t) => t.alive);
       const pts = this.room.spawnPoints
-        .map((p, i) => ({ p, i, d: Math.hypot(p.x - this.player.pos.x, p.z - this.player.pos.z) }))
+        .map((p, i) => ({ p, i, d: Math.min(...ts.map((t) => Math.hypot(p.x - t.pos.x, p.z - t.pos.z)), 999) }))
         .filter((o) => o.d > 18 && this.spawnCooldown[o.i] <= 0)
         .sort((a, b) => a.d - b.d);
       const pick = pts.length ? pts[Math.floor(Math.random() * Math.min(4, pts.length))] : { p: this.room.spawnPoints[0], i: 0 };
@@ -333,9 +522,15 @@ export class Game {
     this.spawnEnemy(type, pos, hard);
   }
 
-  private spawnEnemy(type: EnemyType, pos: THREE.Vector3, hard = false) {
+  private spawnEnemy(type: EnemyType, pos: THREE.Vector3, hard = false, puppetId = 0) {
     const e = createEnemy(type, this.mats, hard);
     e.yaw = Math.atan2(this.player.pos.x - pos.x, this.player.pos.z - pos.z);
+    e.netId = puppetId || this.enemyNetId++;
+    if (puppetId) {
+      e.puppet = true;
+      e.netPos.copy(pos);
+      e.netYaw = e.yaw;
+    }
     e.place(pos, this.scene);
     this.enemies.push(e);
     const c = pos.clone().add(new THREE.Vector3(0, e.height * 0.5, 0));
@@ -344,16 +539,60 @@ export class Game {
     audio.spawnPop();
     if (type === 'boss') {
       this.boss = e as Boss;
+      if (puppetId) (e as Boss).intro = 0;
       this.hud.banner('THE WIND-UP KING', 'AIM FOR THE GLOWING CORE!', 3.2);
       audio.bossRoar();
       this.player.shake(0.6);
       this.fx.confetti(c, 60);
     }
+    return e;
+  }
+
+  spawnPuppet(type: EnemyType, id: number, pos: THREE.Vector3) {
+    return this.spawnEnemy(type, pos, false, id);
+  }
+
+  removeEnemySilently(e: Enemy) {
+    e.dead = true;
+  }
+
+  killPuppet(e: Enemy, dir: THREE.Vector3) {
+    e.puppet = false;
+    e.takeDamage(1e9, dir, this.ectx(), 1);
+  }
+
+  /** Local damage to an enemy; co-op clients forward it to the simulating player. */
+  damageEnemy(e: Enemy, dmg: number, dir: THREE.Vector3 | null, knock = 1) {
+    if (e.dead) return false;
+    if (e.puppet) {
+      e.hitFx();
+      if (dir) this.mp?.sendEnemyHit(e, dmg, dir);
+      return false;
+    }
+    if (!e.lastHitBy || !this.mp || this.mp.isLeader) e.lastHitBy = e.lastHitBy || this.selfId;
+    return e.takeDamage(dmg, dir, this.ectx(), knock);
+  }
+
+  /** Damage from my own weapons (records me as the attacker for co-op credit). */
+  private myHitEnemy(e: Enemy, dmg: number, dir: THREE.Vector3 | null, knock = 1) {
+    if (!e.puppet) e.lastHitBy = this.selfId;
+    return this.damageEnemy(e, dmg, dir, knock);
+  }
+
+  coopBecomeLeader(info: Session['coopInfo']) {
+    for (const e of this.enemies) {
+      e.puppet = false;
+      e.vel.set(0, 0, 0);
+    }
+    const alive = this.enemies.filter((e) => !e.dead).length;
+    this.waves.resume(info.wave, info.killed, info.total, alive);
+    this.hud.toast('You are now hosting the toys');
   }
 
   private ectx(): EnemyCtx {
     return {
       player: this.player,
+      listener: this.player,
       world: this.world,
       nav: this.nav,
       fx: this.fx,
@@ -364,7 +603,10 @@ export class Game {
         this.spawnEnemy(type, pos);
         this.waves.onExtraSpawn();
       },
-      shockwave: (pos) => this.spawnShockwave(pos),
+      shockwave: (pos) => {
+        this.spawnShockwave(pos);
+        if (this.inMatch) this.mp!.sendShock(pos);
+      },
       onKilled: (e) => this.onKilled(e),
     };
   }
@@ -373,7 +615,8 @@ export class Game {
     this.stats.kills++;
     this.stats.score += e.score;
     this.waves.onKill();
-    this.hud.hitmarker(true);
+    if (e.lastHitBy === this.selfId || !this.inMatch) this.hud.hitmarker(true);
+    if (this.inMatch && this.mode === 'coop' && this.mp!.isLeader) this.mp!.coopKilled(e, null);
     if (e.type === 'robot' || e.type === 'boss') this.hitstop = e.type === 'boss' ? 0.25 : 0.06;
     if (e.type === 'boss') {
       this.boss = null;
@@ -381,15 +624,16 @@ export class Game {
       this.fx.explosion(e.pos.clone().add(new THREE.Vector3(0, 5, 0)), 7);
       audio.explosion(5);
     }
-    // drops
-    const r = Math.random();
-    const hpChance = e.type === 'robot' ? 0.6 : e.type === 'chomper' ? 0.3 : e.type === 'bug' ? 0.05 : 0.15;
+    // drops (each player rolls their own loot)
+    const hpChance = e.type === 'robot' ? 0.8 : e.type === 'chomper' ? 0.45 : e.type === 'bug' ? 0.08 : 0.25;
     const amChance = e.type === 'robot' ? 0.7 : e.type === 'bug' ? 0.06 : 0.25;
+    const nadeChance = e.type === 'robot' ? 0.5 : e.type === 'chomper' ? 0.2 : e.type === 'bug' ? 0.02 : 0.08;
     if (e.type === 'boss') {
       for (let i = 0; i < 3; i++) this.pickups.spawn('health', e.pos);
     } else {
-      if (r < hpChance) this.pickups.spawn('health', e.pos);
+      if (Math.random() < hpChance) this.pickups.spawn('health', e.pos);
       if (Math.random() < amChance) this.pickups.spawn('ammo', e.pos);
+      if (Math.random() < nadeChance) this.pickups.spawn(Math.random() < 0.65 ? 'frag' : 'flash', e.pos);
     }
   }
 
@@ -405,11 +649,22 @@ export class Game {
     this.fx.puff(pos.clone().setY(1), 0xffffff, 3, 8, 0.8);
   }
 
+  spawnShockwavePublic(pos: THREE.Vector3) {
+    this.spawnShockwave(pos);
+    audio.stomp();
+  }
+
   // ------------------------------------------------------------------ combat
+
+  private hostileAvatars(): RemoteAvatar[] {
+    if (!this.inMatch || this.mode === 'coop') return [];
+    return [...this.mp!.avatars.values()].filter((a) => a.alive && this.mp!.isEnemy(a.id));
+  }
 
   private fireCtx: FireContext = {
     hitscan: (origin, dir, range, damage, tracerColor, muzzle, pellet) => {
       this.stats.shots += pellet === 0 ? 1 : 0;
+      const wpn = this.weapons.current;
       const wh = this.world.raycast(origin, dir, range, tmpHit);
       let maxD = wh ? wh.dist : range;
       let best: { e: Enemy; t: number; mult: number } | null = null;
@@ -419,18 +674,35 @@ export class Game {
         if (h && (!best || h.t < best.t)) best = { e, t: h.t, mult: h.mult };
       }
       if (best) maxD = best.t;
+      let bestAv: { a: RemoteAvatar; t: number; mult: number } | null = null;
+      for (const a of this.hostileAvatars()) {
+        const h = a.rayHit(origin, dir, maxD, this.input.isTouch ? 0.12 : 0.03);
+        if (h && (!bestAv || h.t < bestAv.t)) bestAv = { a, t: h.t, mult: h.mult };
+      }
+      if (bestAv) {
+        maxD = bestAv.t;
+        best = null;
+      }
       const ph = this.props.rayHit(origin, dir, maxD);
       let end: THREE.Vector3;
       if (ph) {
         end = origin.clone().addScaledVector(dir, ph.t);
-        this.props.impulseAt(end, dir, this.weapons.current === 1 ? 2.2 : 3.5, 0.3);
+        this.props.impulseAt(end, dir, wpn === 1 ? 2.2 : 3.5, 0.3);
         this.fx.impact(end, dir.clone().negate(), 0xfff0c0);
         audio.surfaceHit();
+      } else if (bestAv) {
+        end = origin.clone().addScaledVector(dir, bestAv.t);
+        const head = bestAv.mult > 1.2;
+        this.mp!.sendHit(bestAv.a.id, damage * bestAv.mult, wpn, origin);
+        bestAv.a.hitFlash();
+        this.stats.hits++;
+        this.fx.impact(end, dir.clone().negate(), head ? 0xffff80 : 0xffe0a0, [0xffffff, 0xffcf33]);
+        this.hud.hitmarker(false);
+        audio.hit(head);
       } else if (best) {
         end = origin.clone().addScaledVector(dir, best.t);
-        const dmg = damage * best.mult;
         const head = best.mult > 1.2;
-        best.e.takeDamage(dmg, dir, this.ectx(), this.weapons.current === 1 ? 0.5 : 1);
+        this.myHitEnemy(best.e, damage * best.mult, dir, wpn === 1 ? 0.5 : 1);
         this.stats.hits++;
         this.fx.impact(end, dir.clone().negate(), head ? 0xffff80 : 0xffe0a0, best.e.colors);
         if (!best.e.dead) this.hud.hitmarker(false);
@@ -438,14 +710,20 @@ export class Game {
       } else if (wh) {
         end = wh.point.clone();
         this.fx.impact(end, wh.normal, 0xfff0c0);
-        if (pellet < 4) this.fx.decal(end, wh.normal, this.weapons.current === 1 ? 0.18 : 0.14);
+        if (pellet < 4) this.fx.decal(end, wh.normal, wpn === 1 ? 0.18 : 0.14);
         if (pellet === 0) audio.surfaceHit();
       } else end = origin.clone().addScaledVector(dir, range);
-      if (pellet < 3) this.fx.tracer(muzzle, end, tracerColor, this.weapons.current === 1 ? 0.04 : 0.05, this.weapons.current === 1 ? 0.07 : 0.06);
+      if (pellet < 3) {
+        if (!this.weapons.scoped) this.fx.tracer(muzzle, end, tracerColor, wpn === SNIPER ? 0.06 : wpn === 1 ? 0.04 : 0.05, wpn === SNIPER ? 0.15 : 0.07);
+        else this.fx.tracer(origin.clone().addScaledVector(dir, 2).add(new THREE.Vector3(0, -0.3, 0)), end, tracerColor, 0.05, 0.12);
+        this.shotEnds.push(end);
+      }
     },
     fireRocket: (muzzle, dir) => {
       this.stats.shots++;
-      this.proj.spawn('rocket', muzzle, dir.clone().multiplyScalar(46), WEAPONS[2].damage, false);
+      const vel = dir.clone().multiplyScalar(46);
+      this.proj.spawn('rocket', muzzle, vel, WEAPONS[2].damage, false, this.selfId);
+      if (this.inMatch) this.mp!.sendRocket(muzzle, vel);
     },
     melee: (origin, dir) => {
       let hit = false;
@@ -457,9 +735,21 @@ export class Game {
         if (d > 2.4) continue;
         if (to.normalize().dot(dir) < 0.45 && d > 0.6) continue;
         const flat = new THREE.Vector3(dir.x, 0.25, dir.z).normalize();
-        e.takeDamage(e.type === 'bug' ? 50 : 45, flat, this.ectx(), 3);
+        this.myHitEnemy(e, e.type === 'bug' ? 50 : 45, flat, 3);
         this.fx.impact(c, dir.clone().negate(), 0xffffff, e.colors);
         if (!e.dead) this.hud.hitmarker(false);
+        hit = true;
+      }
+      for (const a of this.hostileAvatars()) {
+        const c = a.centerPos;
+        const to = c.clone().sub(origin);
+        const d = to.length() - 0.45;
+        if (d > 2.4 || (to.normalize().dot(dir) < 0.45 && d > 0.6)) continue;
+        const flat = new THREE.Vector3(dir.x, 0.35, dir.z).normalize();
+        this.mp!.sendHit(a.id, 55, 98, origin, flat.multiplyScalar(9));
+        a.hitFlash();
+        this.fx.impact(c, dir.clone().negate(), 0xffffff, [0xffffff]);
+        this.hud.hitmarker(false);
         hit = true;
       }
       const end = origin.clone().addScaledVector(dir, 2.4);
@@ -473,10 +763,14 @@ export class Game {
         const h = e.rayHit(origin, dir, d, 0.1);
         if (h) d = Math.min(d, h.t);
       }
+      for (const a of this.hostileAvatars()) {
+        const h = a.rayHit(origin, dir, d, 0.1);
+        if (h) d = Math.min(d, h.t);
+      }
       return origin.clone().addScaledVector(dir, Math.max(3, d));
     },
     muzzleFlash: (p, color, size) => {
-      this.fx.glow(p, color, size * 0.6, size * 0.2, 0.06);
+      if (!this.weapons.scoped) this.fx.glow(p, color, size * 0.6, size * 0.2, 0.06);
       if (this.muzzleLight) {
         this.muzzleLight.position.copy(p);
         this.muzzleLight.color.setHex(color);
@@ -485,31 +779,95 @@ export class Game {
     },
   };
 
-  private explode(at: THREE.Vector3, radius: number, damage: number, hostile: boolean) {
-    this.fx.explosion(at, radius * 0.55);
-    this.props.explosion(at, radius, 22);
-    const pd = this.player.centerPos.distanceTo(at);
-    audio.explosion(pd);
-    this.player.shake(Math.max(0, 0.6 - pd * 0.02));
+  /** Explosion with gameplay effects. `mine` = caused by the local player. */
+  private explode(at: THREE.Vector3, radius: number, damage: number, hostile: boolean, mine: boolean) {
+    this.explodeVisual(at, radius);
+    if (mine && this.inMatch) this.mp!.sendBoom(at, radius);
     const ctx = this.ectx();
-    if (!hostile) {
+    if (!hostile && mine) {
       for (const e of this.enemies) {
         if (e.dead) continue;
         const d = e.distTo(at);
         if (d > radius) continue;
         const k = 1 - d / radius;
         const dir = e.pos.clone().sub(at).setY(0.5).normalize();
-        e.takeDamage(damage * (0.3 + 0.7 * k), dir, ctx, 2.2);
+        this.myHitEnemy(e, damage * (0.3 + 0.7 * k), dir, 2.2);
         this.stats.hits++;
       }
+      for (const a of this.hostileAvatars()) {
+        const d = a.centerPos.distanceTo(at);
+        if (d > radius) continue;
+        const k = 1 - d / radius;
+        const dir = a.centerPos.sub(at).normalize();
+        this.mp!.sendHit(a.id, damage * 0.85 * (0.3 + 0.7 * k), 2, at, dir.multiplyScalar(14 * k));
+        a.hitFlash();
+        this.hud.hitmarker(false);
+      }
     }
-    if (pd < radius) {
+    if (hostile && this.inMatch && this.mode === 'coop' && this.mp!.isLeader) {
+      // the co-op host resolves enemy bombs against everyone
+      for (const a of this.mp!.avatars.values()) {
+        const d = a.centerPos.distanceTo(at);
+        if (d < radius && a.alive) a.damage(damage * (0.35 + 0.65 * (1 - d / radius)), at);
+      }
+    }
+    void ctx;
+    const pd = this.player.centerPos.distanceTo(at);
+    if (pd < radius && (hostile || mine)) {
       const k = 1 - pd / radius;
       const dir = this.player.centerPos.sub(at).normalize();
-      // rocket jumping is allowed (and fun); self damage is reduced
+      // rocket/grenade jumping is allowed (and fun); self damage is reduced
       this.player.knock(dir, 14 * k);
       this.player.damage((hostile ? damage : damage * 0.12) * (0.35 + 0.65 * k), at);
     }
+  }
+
+  /** Purely visual explosion (also used for other players' explosions). */
+  explodeVisual(at: THREE.Vector3, radius: number) {
+    this.fx.explosion(at, radius * 0.55);
+    this.props.explosion(at, radius, 22);
+    const pd = this.player.centerPos.distanceTo(at);
+    audio.explosion(pd);
+    this.player.shake(Math.max(0, 0.6 - pd * 0.02));
+  }
+
+  /** A flash cube went off. `from` = player id that threw it ('' = me in solo). */
+  flashAt(p: THREE.Vector3, from: string) {
+    this.fx.glow(p, 0xffffff, 16, 2, 0.35);
+    this.fx.glow(p, 0xbfe0ff, 6, 22, 0.6);
+    this.fx.puff(p, 0xffffff, 1, 4, 0.8);
+    const cam = this.player.camera.position;
+    const dist = cam.distanceTo(p);
+    audio.flashbang(dist);
+    if (this.player.alive && dist < 34 && this.world.lineOfSight(cam, p)) {
+      const facing = this.player.forward().dot(p.clone().sub(cam).normalize());
+      let amt = (1 - dist / 34) * (0.35 + 0.65 * Math.max(0, facing)) * 1.7;
+      const friendly = from === this.selfId || (this.inMatch && (this.mode === 'coop' || !this.mp!.isEnemy(from)));
+      if (friendly) amt *= from === this.selfId ? 0.55 : 0.3;
+      this.blind = Math.min(1.4, Math.max(this.blind, amt));
+    }
+    if (this.simulatesEnemies) {
+      for (const e of this.enemies) {
+        if (e.dead || e.puppet) continue;
+        const d = e.pos.distanceTo(p);
+        if (d < 22 && this.world.lineOfSight(p, e.pos.clone().setY(e.pos.y + e.height * 0.6))) e.stun = Math.max(e.stun, 1.2 + 3 * (1 - d / 22) * (e.type === 'boss' ? 0.4 : 1));
+      }
+    }
+  }
+
+  private throwNade(kind: 'frag' | 'flash') {
+    if (this.nades[kind] <= 0 || !this.player.alive) {
+      if (this.nades[kind] <= 0) this.hud.toast(kind === 'frag' ? 'NO GRENADES — find one on the floor' : 'NO FLASH CUBES — find one on the floor');
+      return;
+    }
+    this.nades[kind]--;
+    const pl = this.player;
+    const fwd = pl.forward();
+    const from = pl.camera.position.clone().addScaledVector(fwd, 0.7).add(new THREE.Vector3(0, -0.2, 0));
+    const vel = fwd.clone().multiplyScalar(24).add(new THREE.Vector3(0, 5, 0)).addScaledVector(pl.vel, 0.5);
+    this.proj.spawn(kind, from, vel, kind === 'frag' ? 115 : 0, false, this.selfId);
+    if (this.inMatch) this.mp!.sendNade(kind, from, vel);
+    audio.throwWhoosh();
   }
 
   private projHooks: ProjectileHooks = {
@@ -521,33 +879,56 @@ export class Game {
       for (const e of this.enemies) {
         if (e.rayHit(from, d, len + p.radius, p.radius)) {
           this.stats.hits++;
-          e.takeDamage(p.damage * 0.5, d, this.ectx(), 1.5);
-          this.explode(to.clone().addScaledVector(d, -0.3), 6.5, p.damage * 0.75, false);
+          this.myHitEnemy(e, p.damage * 0.5, d, 1.5);
+          this.explode(to.clone().addScaledVector(d, -0.3), 6.5, p.damage * 0.75, false, true);
+          return true;
+        }
+      }
+      for (const a of this.hostileAvatars()) {
+        if (a.rayHit(from, d, len + p.radius, p.radius)) {
+          this.mp!.sendHit(a.id, p.damage * 0.4, 2, from);
+          this.explode(to.clone().addScaledVector(d, -0.3), 6.5, p.damage * 0.75, false, true);
           return true;
         }
       }
       return false;
     },
     hitPlayer: (p) => {
-      const pl = this.player;
-      if (!pl.alive) return false;
-      const dy = p.pos.y - pl.pos.y;
-      if (dy < -p.radius || dy > pl.height + p.radius) return false;
-      const dx = p.pos.x - pl.pos.x, dz = p.pos.z - pl.pos.z;
-      if (Math.hypot(dx, dz) > pl.radius + p.radius + 0.1) return false;
-      if (p.kind !== 'bomb') {
-        pl.damage(p.damage, p.pos.clone().sub(p.vel));
-        this.fx.impact(p.pos, p.vel.clone().normalize().negate(), p.kind === 'bolt' ? 0x60e0ff : 0xff8060);
-      }
-      return true;
+      const tryHit = (t: Target) => {
+        if (!t.alive) return false;
+        const dy = p.pos.y - t.pos.y;
+        if (dy < -p.radius || dy > t.height + p.radius) return false;
+        if (Math.hypot(p.pos.x - t.pos.x, p.pos.z - t.pos.z) > 0.42 + p.radius + 0.1) return false;
+        if (p.kind !== 'bomb') {
+          t.damage(p.damage, p.pos.clone().sub(p.vel));
+          this.fx.impact(p.pos, p.vel.clone().normalize().negate(), p.kind === 'bolt' ? 0x60e0ff : 0xff8060);
+        }
+        return true;
+      };
+      for (const t of this.targets()) if (tryHit(t)) return true;
+      return false;
     },
     explode: (p, at) => {
-      this.explode(at, p.kind === 'bomb' ? 5.5 : 6.5, p.kind === 'bomb' ? p.damage : p.damage * 0.75, p.hostile);
+      if (p.kind === 'flash') {
+        if (!p.ghost) {
+          this.flashAt(at, this.selfId);
+          if (this.inMatch) this.mp!.sendFlash(at);
+        }
+        return;
+      }
+      if (p.ghost) {
+        this.explodeVisual(at, p.kind === 'bomb' ? 5.5 : p.kind === 'frag' ? 7 : 6.5);
+        return;
+      }
+      if (p.kind === 'frag') this.explode(at, 7.5, p.damage, false, true);
+      else if (p.kind === 'bomb') this.explode(at, 5.5, p.damage, true, false);
+      else this.explode(at, 6.5, p.damage * 0.75, p.hostile, !p.hostile);
     },
     impact: (p, hit) => {
       this.fx.impact(hit.point, hit.normal, p.kind === 'bolt' ? 0x60e0ff : 0xff9060);
       if (p.kind === 'bolt') this.fx.glow(hit.point, 0x40c0ff, 1.2, 0.2, 0.2);
     },
+    bounce: () => audio.bounce(),
   };
 
   // ------------------------------------------------------------------ aim assist
@@ -556,32 +937,34 @@ export class Game {
     const cam = this.player.camera;
     const fwd = this.player.forward();
     const origin = cam.position;
-    let best: Enemy | null = null;
     let bestAng = this.input.isTouch ? 0.13 : 0.035;
+    if (this.weapons.scoped) bestAng *= 0.4;
     let bestPoint: THREE.Vector3 | null = null;
-    for (const e of this.enemies) {
-      if (e.dead || !e.hitSpheres.length) continue;
-      const c = e.hitSpheres[0].c;
+    const consider = (c: THREE.Vector3, r: number) => {
       const to = v1.subVectors(c, origin);
       const dist = to.length();
-      if (dist > 80) continue;
-      const ang = Math.acos(Math.min(1, to.dot(fwd) / dist)) - Math.atan2(e.hitSpheres[0].r, dist);
+      if (dist > 90) return;
+      const ang = Math.acos(Math.min(1, to.dot(fwd) / dist)) - Math.atan2(r, dist);
       if (ang < bestAng) {
         bestAng = ang;
-        best = e;
         bestPoint = c.clone();
       }
-    }
-    if (best && bestPoint && !this.world.lineOfSight(origin, bestPoint)) best = null;
-    this.onTarget = !!best && bestAng < 0.03;
-    if (best && bestPoint && this.input.isTouch && this.player.alive) {
-      const to = bestPoint.sub(origin).normalize();
+    };
+    for (const e of this.enemies) if (!e.dead && e.hitSpheres.length) consider(e.hitSpheres[0].c, e.hitSpheres[0].r);
+    for (const a of this.hostileAvatars()) consider(a.centerPos, 0.45);
+    let found = bestPoint as THREE.Vector3 | null;
+    if (found && !this.world.lineOfSight(origin, found)) found = null;
+    this.onTarget = !!found && bestAng < 0.03;
+    if (found && this.input.isTouch && this.player.alive) {
+      const to = found.sub(origin).normalize();
       const wantYaw = Math.atan2(-to.x, -to.z);
       const wantPitch = Math.asin(to.y);
       let dy = wantYaw - this.player.yaw;
       while (dy > Math.PI) dy -= Math.PI * 2;
       while (dy < -Math.PI) dy += Math.PI * 2;
-      const strength = (this.input.fire ? 4.5 : 1.6) * dt;
+      // gentler assist against real players
+      const pvp = this.hostileAvatars().length > 0 ? 0.55 : 1;
+      const strength = (this.input.fire ? 4.5 : 1.6) * dt * pvp;
       this.player.yaw += dy * Math.min(1, strength);
       this.player.pitch += (wantPitch - this.player.pitch) * Math.min(1, strength * 0.7);
     }
@@ -592,7 +975,7 @@ export class Game {
   private updateWeaponHud() {
     const w = this.weapons;
     const a = w.ammo[w.current];
-    this.hud.weapon(w.current, w.def.name, a.mag, a.reserve, w.state === 'reload');
+    this.hud.weapon(w.current, w.def.name, a.mag, a.reserve, w.state === 'reload', w.owned, w.allowed);
   }
 
   tick = () => {
@@ -600,7 +983,6 @@ export class Game {
     const now = performance.now();
     const dt = Math.min(0.05, Math.max(0, (now - this.lastFrame) / 1000));
     this.lastFrame = now;
-    this.trackPerf(dt);
     this.step(dt);
     this.renderer.info.reset();
     this.render();
@@ -617,14 +999,16 @@ export class Game {
       dt *= 0.15;
     }
     this.time += dt;
-
     if (this.state === 'menu' || this.state === 'over') this.updateMenuCam(dt);
-    if (this.state === 'playing' || this.state === 'dying') this.updatePlaying(dt);
-    if (this.state !== 'paused') {
+    // matches keep simulating while the pause overlay is open
+    const live = this.state === 'playing' || this.state === 'dying' || (this.state === 'paused' && this.inMatch) || this.state === 'mpover';
+    if (live) this.updatePlaying(dt);
+    if (this.state !== 'paused' || this.inMatch) {
       this.updateAmbient(dt);
       this.fx.update(dt, this.player.camera);
       debris.update(dt);
     }
+    if (this.mp && !this.mp.self.inMatch) this.mp.update(dt);
     this.hud.update(dt);
   }
 
@@ -635,12 +1019,9 @@ export class Game {
     cam.position.set(-22 + Math.cos(t) * 26, 6 + Math.sin(t * 1.7) * 1.5, 18 + Math.sin(t) * 16);
     cam.lookAt(-22 + Math.cos(t + 1.9) * 10, 4, 14 + Math.sin(t + 1.9) * 10);
     cam.updateMatrixWorld();
-    // still animate the hands for the menu
-    this.weapons.camera.updateMatrixWorld();
   }
 
   private updateAmbient(dt: number) {
-    // train loop
     this.trainT += dt * 0.32;
     const cars = this.room.train.userData.cars as THREE.Group[];
     cars.forEach((car, i) => {
@@ -650,7 +1031,6 @@ export class Game {
       car.lookAt(ahead.x, car.position.y, ahead.z);
       car.position.y += Math.abs(Math.sin(this.time * 18 + i)) * 0.03;
     });
-    // dust motes drift
     const attr = this.room.motes.geometry.attributes.position as THREE.BufferAttribute;
     const arr = attr.array as Float32Array;
     for (let i = 0; i < arr.length; i += 3) {
@@ -663,24 +1043,49 @@ export class Game {
 
   private updatePlaying(dt: number) {
     const input = this.input;
-    input.poll();
+    const frozen = this.state === 'mpover' || this.state === 'paused';
+    if (!frozen) input.poll();
+    else input.reset();
     const pl = this.player;
     if (this.state === 'playing') {
       this.stats.time += dt;
       this.updateAim(dt);
     }
-    pl.update(dt, input, this.weapons.def.speedMul);
+    // scope zoom
+    const sniperAds = this.weapons.def.sniper && this.weapons.adsT > 0.5;
+    pl.zoomFov = sniperAds ? 24 : null;
+    input.lookScale = this.weapons.scoped ? 0.35 : 1;
+    pl.update(dt, input, this.weapons.def.speedMul * (this.weapons.adsT > 0.5 ? 0.6 : 1));
+    this.shotEnds = [];
+    this.shotWeapon = -1;
     this.weapons.update(dt, input, pl, this.fireCtx, this.time);
+    if (this.inMatch && this.shotWeapon >= 0 && this.shotWeapon !== 2) this.mp!.sendShot(this.shotWeapon, this.shotEnds);
+    if (input.throwFrag) this.throwNade('frag');
+    if (input.throwFlash) this.throwNade('flash');
 
     this.navTimer -= dt;
     if (this.navTimer <= 0) {
       this.navTimer = 0.3;
-      this.nav.update(pl.pos.x, pl.pos.z);
+      const extra = this.targets().slice(1).filter((t) => t.alive).map((t) => ({ x: t.pos.x, z: t.pos.z }));
+      this.nav.update(pl.pos.x, pl.pos.z, extra);
     }
     for (let i = 0; i < this.spawnCooldown.length; i++) this.spawnCooldown[i] -= dt;
 
+    // enemies (survival / co-op)
     const ctx = this.ectx();
-    for (const e of this.enemies) if (!e.dead) e.update(dt, ctx);
+    const targets = this.targets().filter((t) => t.alive);
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      if (targets.length > 1) {
+        let best = targets[0], bd = Infinity;
+        for (const t of targets) {
+          const d = t.pos.distanceToSquared(e.pos);
+          if (d < bd) { bd = d; best = t; }
+        }
+        ctx.player = best;
+      } else ctx.player = this.player;
+      e.update(dt, ctx);
+    }
     this.separate();
     const dead = this.enemies.filter((e) => e.dead);
     if (dead.length) {
@@ -692,45 +1097,34 @@ export class Game {
     const kickers = [{ pos: pl.pos, vel: pl.vel, r: pl.radius }];
     for (const e of this.enemies) if (e.type !== 'bug') kickers.push({ pos: e.pos, vel: e.vel, r: e.radius });
     this.props.update(dt, kickers);
-    this.pickups.update(dt, pl.pos, (k: PickupKind) => {
-      if (k === 'health') {
-        if (pl.health >= pl.maxHealth) return false;
-        pl.heal(25);
-        this.hud.toast('+25 HEALTH');
-      } else {
-        this.weapons.addAmmo(0.25);
-        this.hud.toast('AMMO +');
-      }
-      audio.pickup();
-      return true;
-    });
+    this.pickups.update(dt, pl.pos, (k: PickupKind) => this.collect(k));
     this.updateShockwaves(dt);
 
-    if (this.state === 'playing') this.waves.update(dt);
+    if (this.state === 'playing' && this.simulatesEnemies && this.waves.state !== 'done') this.waves.update(dt);
     if (this.victoryT > 0 && this.state === 'playing') {
       this.victoryT -= dt;
       if (this.victoryT <= 0) this.endGame(true);
     }
+    if (this.mp && this.mp.self.inMatch) this.mp.update(dt);
 
-    // HUD
-    this.hud.health(pl.health, pl.maxHealth);
-    this.hud.enemies(this.waves.remaining);
-    const total = this.waves.total + this.waves.extraSpawned;
-    this.hud.waveProgress(total ? this.waves.killed / total : 0);
-    this.hud.score(this.stats.score);
-    this.hud.damage(pl.hurtFlash * 0.9 + (pl.health < 30 ? 0.25 + Math.sin(this.time * 6) * 0.1 : 0));
-    const spread = this.weapons.def.spread * 400 * (1 + pl.speed01 * (this.weapons.current === 1 ? 0.2 : 1.6)) + (this.weapons.state === 'reload' ? 6 : 0);
-    this.hud.crosshair(Math.min(30, spread), this.onTarget);
-    this.hud.boss(this.boss && !this.boss.dead ? Math.max(0, this.boss.hp / this.boss.maxHp) : null);
-    this.updateWeaponHud();
+    this.blind = Math.max(0, this.blind - dt * 0.42);
+    this.updateHud();
 
     // death
     if (!pl.alive && this.state === 'playing') {
-      this.state = 'dying';
-      this.deathT = 0;
-      audio.defeat();
-      this.hud.banner('KNOCKED OVER!', '', 2);
-      this.mobile.show(false);
+      if (this.inMatch) {
+        this.mp!.localDied();
+        this.state = 'dying';
+        this.deathT = 0;
+        this.hud.banner('KNOCKED OUT!', this.mode === 'coop' ? 'your squad can still win — back in a few seconds' : 'respawning…', 2);
+        this.mobile.show(false);
+      } else {
+        this.state = 'dying';
+        this.deathT = 0;
+        audio.defeat();
+        this.hud.banner('KNOCKED OVER!', '', 2);
+        this.mobile.show(false);
+      }
     }
     if (this.state === 'dying') {
       this.deathT += dt;
@@ -740,19 +1134,103 @@ export class Game {
       cam.rotation.z = k * 1.35;
       cam.rotation.x = pl.pitch * (1 - k) + 0.2 * k;
       cam.updateMatrixWorld();
-      if (this.deathT > 2.2) this.endGame(false);
+      if (!this.inMatch && this.deathT > 2.2) this.endGame(false);
+      if (this.inMatch && pl.alive) this.state = 'playing';
     }
     input.endFrame();
+  }
+
+  private collect(k: PickupKind): boolean {
+    const pl = this.player;
+    switch (k) {
+      case 'health':
+        if (pl.health >= pl.maxHealth) return false;
+        pl.heal(35);
+        this.hud.toast('+35 HEALTH');
+        break;
+      case 'ammo':
+        this.weapons.addAmmo(0.3);
+        this.hud.toast('AMMO +');
+        break;
+      case 'frag':
+        if (this.nades.frag >= MAX_NADES) return false;
+        this.nades.frag++;
+        this.hud.toast(`+1 GRENADE  (${this.input.isTouch ? 'tap 💣' : 'press G'})`);
+        break;
+      case 'flash':
+        if (this.nades.flash >= MAX_NADES) return false;
+        this.nades.flash++;
+        this.hud.toast(`+1 FLASH CUBE  (${this.input.isTouch ? 'tap ✨' : 'press T'})`);
+        break;
+      case 'minigun':
+        if (this.weapons.allowed && !this.weapons.allowed.includes(MINIGUN)) return false;
+        this.weapons.give(MINIGUN);
+        this.hud.banner('TOY MINIGUN!', '160 rounds of pure chaos', 1.8);
+        break;
+    }
+    audio.pickup();
+    return true;
+  }
+
+  private updateHud() {
+    const pl = this.player;
+    const hud = this.hud;
+    hud.health(pl.health, pl.maxHealth);
+    hud.score(this.stats.score);
+    hud.damage(pl.hurtFlash * 0.9 + (pl.health < 30 ? 0.25 + Math.sin(this.time * 6) * 0.1 : 0));
+    hud.flashbang(Math.min(1, this.blind));
+    hud.scope(this.weapons.scoped);
+    hud.nades(this.nades.frag, this.nades.flash);
+    hud.sniperButton(this.weapons.def.sniper === true);
+    const spread = this.weapons.def.spread * 400 * (1 + pl.speed01 * (this.weapons.current === 1 ? 0.2 : 1.6)) + (this.weapons.state === 'reload' ? 6 : 0);
+    hud.crosshair(Math.min(30, this.weapons.def.sniper ? (this.weapons.adsT > 0.85 ? 0 : 26) : spread), this.onTarget);
+    this.updateWeaponHud();
+
+    if (this.inMatch && this.mode !== 'coop') {
+      const s = this.mp!;
+      const def = MODES[this.mode as ModeId];
+      const tl = s.timeLeft();
+      const clock = def.timeLimit ? ` · ${Math.floor(tl / 60)}:${String(Math.floor(tl % 60)).padStart(2, '0')}` : '';
+      let label: string;
+      if (def.teams) {
+        label = `<span style="color:#9be06a">GREEN ${s.teamScore(0)}</span> · <span style="color:#e8c48a">TAN ${s.teamScore(1)}</span>`;
+      } else {
+        const lead = [...s.inMatchPlayers].sort((a, b) => b.kills - a.kills)[0];
+        label = `YOU ${s.self.kills} · ${lead === s.self ? 'YOU LEAD' : `BEST ${lead.kills}`}`;
+      }
+      hud.wave(0, 0, `${def.name}<br><small style="font-size:15px">${label} · FIRST TO ${def.scoreLimit}${clock}</small>`);
+      hud.waveProgress(def.teams ? Math.max(s.teamScore(0), s.teamScore(1)) / def.scoreLimit : Math.max(...s.inMatchPlayers.map((p) => p.kills)) / def.scoreLimit);
+      hud.enemies(s.inMatchPlayers.length, 'PLAYERS');
+      if (this.state === 'dying' && s.respawnT > 0) hud.respawn(s.respawnT);
+      else hud.respawn(0);
+      return;
+    }
+    hud.respawn(this.inMatch && this.state === 'dying' ? this.mp!.respawnT : 0);
+    // survival / co-op wave HUD
+    if (this.simulatesEnemies) {
+      hud.enemies(this.waves.remaining, 'ENEMIES');
+      const total = this.waves.total + this.waves.extraSpawned;
+      hud.waveProgress(total ? this.waves.killed / total : 0);
+      hud.wave(this.waves.wave + 1, WAVES.length, this.waves.wave === WAVES.length - 1 ? 'FINAL WAVE' : undefined);
+      hud.boss(this.boss && !this.boss.dead ? Math.max(0, this.boss.hp / this.boss.maxHp) : null);
+    } else if (this.mp) {
+      const ci = this.mp.coopInfo;
+      hud.enemies(ci.remaining, 'ENEMIES');
+      hud.waveProgress(ci.total ? ci.killed / ci.total : 0);
+      hud.wave(ci.wave + 1, WAVES.length, ci.wave === WAVES.length - 1 ? 'FINAL WAVE' : undefined);
+      const b = this.enemies.find((e) => e.type === 'boss' && !e.dead);
+      hud.boss(b ? Math.max(0, b.hp / b.maxHp) : null);
+    }
   }
 
   private separate() {
     const list = this.enemies;
     for (let i = 0; i < list.length; i++) {
       const a = list[i];
-      if (a.dead) continue;
+      if (a.dead || a.puppet) continue;
       for (let j = i + 1; j < list.length; j++) {
         const b = list[j];
-        if (b.dead) continue;
+        if (b.dead || b.puppet) continue;
         const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
         const r = a.radius + b.radius;
         const d2 = dx * dx + dz * dz;
@@ -767,7 +1245,6 @@ export class Game {
         b.pos.x += (dx / d) * push * wb;
         b.pos.z += (dz / d) * push * wb;
       }
-      // keep enemies out of the player
       const pl = this.player;
       const dx = a.pos.x - pl.pos.x, dz = a.pos.z - pl.pos.z;
       const r = a.radius + pl.radius;
@@ -816,7 +1293,7 @@ export class Game {
   }
 
   private render() {
-    const showVm = this.state === 'playing' || this.state === 'dying' || this.state === 'paused';
+    const showVm = this.state === 'playing' || this.state === 'dying' || this.state === 'paused' || this.state === 'mpover';
     if (this.composer) {
       this.vmPass!.enabled = showVm;
       this.composer.render();
@@ -832,31 +1309,9 @@ export class Game {
     }
   }
 
-  private trackPerf(dt: number) {
-    this.frameAcc += dt;
-    this.frameCount++;
-    if (this.frameAcc < 1) return;
-    const fps = this.frameCount / this.frameAcc;
-    this.frameAcc = 0;
-    this.frameCount = 0;
-    const now = performance.now();
-    if (now - this.lastAdjust < 2000 || this.state !== 'playing') return;
-    let pr = this.pixelRatio;
-    if (fps < 42 && pr > 0.7) pr = Math.max(0.7, pr - 0.2);
-    else if (fps > 58 && pr < this.maxPixelRatio && this.lowEnd) pr = Math.min(this.maxPixelRatio, pr + 0.1);
-    if (pr !== this.pixelRatio) {
-      this.pixelRatio = pr;
-      this.lastAdjust = now;
-      this.renderer.setPixelRatio(pr);
-      this.composer?.setPixelRatio(pr);
-      this.resize();
-    }
-  }
-
   // ------------------------------------------------------------------ debug helpers (used by automated tests)
   debugKillAll() {
-    const ctx = this.ectx();
-    for (const e of [...this.enemies]) if (!e.dead) e.takeDamage(99999, null, ctx);
+    for (const e of [...this.enemies]) if (!e.dead && !e.puppet) e.takeDamage(99999, null, this.ectx());
   }
   debugSkipToWave(i: number) {
     this.debugKillAll();

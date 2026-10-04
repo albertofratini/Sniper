@@ -225,16 +225,69 @@ function pipLayout(n: number): [number, number][] {
 
 // ----------------------------------------------------------------------------- pickups
 
-export type PickupKind = 'health' | 'ammo';
-interface Pickup { kind: PickupKind; mesh: THREE.Object3D; pos: THREE.Vector3; vel: THREE.Vector3; life: number; t: number }
+export type PickupKind = 'health' | 'ammo' | 'frag' | 'flash' | 'minigun';
+interface Pickup { kind: PickupKind; mesh: THREE.Object3D; pos: THREE.Vector3; vel: THREE.Vector3; life: number; t: number; spot: number }
+interface Spot { pos: THREE.Vector3; kind: PickupKind; respawn: number; timer: number; taken: boolean }
 
 export class Pickups {
   readonly group = new THREE.Group();
   list: Pickup[] = [];
   private proto: Record<PickupKind, THREE.Object3D>;
+  spots: Spot[] = [];
+  onSpotTaken: (i: number) => void = () => {};
+
+  /** Someone else (multiplayer) took the item at spot i. */
+  takeSpot(i: number) {
+    const sp = this.spots[i];
+    if (!sp) return;
+    sp.taken = true;
+    sp.timer = sp.respawn;
+    for (const p of this.list) if (p.spot === i) p.life = 0;
+  }
 
   constructor(private mats: Materials, private world: CollisionWorld) {
-    this.proto = { health: this.makeHeart(), ammo: this.makeBattery() };
+    this.proto = { health: this.makeHeart(), ammo: this.makeBattery(), frag: this.makeFrag(), flash: this.makeFlash(), minigun: this.makeCrate() };
+  }
+
+  /** Fixed map spots that respawn their item after it's collected. */
+  setSpots(list: { pos: THREE.Vector3; kind: PickupKind; respawn: number }[]) {
+    this.spots = list.map((l) => ({ ...l, pos: l.pos.clone(), timer: 0, taken: true }));
+  }
+
+  private makeFrag() {
+    const g = new THREE.Group();
+    const green = new THREE.MeshStandardMaterial({ color: 0x4f8f2a, roughness: 0.4, emissive: 0x1f4010, emissiveIntensity: 0.6 });
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 10), green);
+    b.scale.set(1, 1.2, 1);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.14, 10), new THREE.MeshStandardMaterial({ color: 0xffcf33, roughness: 0.3, emissive: 0x806000, emissiveIntensity: 0.5 }));
+    cap.position.y = 0.42;
+    g.add(b, cap);
+    return g;
+  }
+
+  private makeFlash() {
+    const g = new THREE.Group();
+    const c = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, emissive: 0x6080a0, emissiveIntensity: 0.6 }));
+    const st = new THREE.Mesh(new THREE.BoxGeometry(0.47, 0.12, 0.47), new THREE.MeshStandardMaterial({ color: 0x3fa9ff, roughness: 0.3 }));
+    g.add(c, st);
+    return g;
+  }
+
+  private makeCrate() {
+    const g = new THREE.Group();
+    const m = new THREE.MeshStandardMaterial({ color: 0xff6fa8, roughness: 0.35, emissive: 0x802040, emissiveIntensity: 0.5, map: this.mats.plasticMap });
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.8, 0.8), m);
+    const band = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.18, 0.84), new THREE.MeshStandardMaterial({ color: 0xffcf33, roughness: 0.3, emissive: 0x806000, emissiveIntensity: 0.6 }));
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.0, 8), new THREE.MeshStandardMaterial({ color: 0x2fb3b3, roughness: 0.3 }));
+      barrel.rotation.z = Math.PI / 2;
+      barrel.position.set(0.2, 0.55 + Math.sin(a) * 0.12, Math.cos(a) * 0.12);
+      g.add(barrel);
+    }
+    g.add(box, band);
+    g.scale.setScalar(0.8);
+    return g;
   }
 
   private makeHeart() {
@@ -265,18 +318,31 @@ export class Pickups {
     return g;
   }
 
-  spawn(kind: PickupKind, pos: THREE.Vector3) {
+  spawn(kind: PickupKind, pos: THREE.Vector3, spot = -1) {
     const mesh = this.proto[kind].clone();
     this.group.add(mesh);
-    this.list.push({ kind, mesh, pos: pos.clone().add(new THREE.Vector3(0, 0.6, 0)), vel: new THREE.Vector3((Math.random() - 0.5) * 4, 7, (Math.random() - 0.5) * 4), life: 22, t: Math.random() * 6 });
+    const still = spot >= 0;
+    this.list.push({
+      kind, mesh, pos: pos.clone().add(new THREE.Vector3(0, 0.6, 0)),
+      vel: still ? new THREE.Vector3() : new THREE.Vector3((Math.random() - 0.5) * 4, 7, (Math.random() - 0.5) * 4),
+      life: still ? Infinity : 22, t: Math.random() * 6, spot,
+    });
   }
 
   update(dt: number, playerPos: THREE.Vector3, collect: (k: PickupKind) => boolean) {
+    this.spots.forEach((sp, i) => {
+      if (!sp.taken) return;
+      sp.timer -= dt;
+      if (sp.timer <= 0) {
+        sp.taken = false;
+        this.spawn(sp.kind, sp.pos, i);
+      }
+    });
     for (const p of this.list) {
       p.life -= dt;
       p.t += dt;
       const d = p.pos.distanceTo(new THREE.Vector3(playerPos.x, playerPos.y + 0.8, playerPos.z));
-      if (d < 4.5) {
+      if (d < 4.5 && p.spot < 0) {
         // magnet
         const dir = new THREE.Vector3(playerPos.x, playerPos.y + 0.8, playerPos.z).sub(p.pos).normalize();
         p.vel.lerp(dir.multiplyScalar(16), Math.min(1, dt * 6));
@@ -291,7 +357,15 @@ export class Pickups {
         p.pos.y = g;
         p.vel.y = Math.max(0, p.vel.y);
       }
-      if (d < 1.2 && collect(p.kind)) p.life = 0;
+      if (d < 1.3 && collect(p.kind)) {
+        p.life = 0;
+        if (p.spot >= 0) {
+          const sp = this.spots[p.spot];
+          sp.taken = true;
+          sp.timer = sp.respawn;
+          this.onSpotTaken(p.spot);
+        }
+      }
       p.mesh.position.copy(p.pos);
       p.mesh.position.y += Math.sin(p.t * 3) * 0.12;
       p.mesh.rotation.y += dt * 2.5;
@@ -305,5 +379,9 @@ export class Pickups {
   clear() {
     for (const p of this.list) this.group.remove(p.mesh);
     this.list = [];
+    for (const sp of this.spots) {
+      sp.taken = true;
+      sp.timer = sp.kind === 'minigun' ? 30 : 4;
+    }
   }
 }

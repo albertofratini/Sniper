@@ -3,7 +3,7 @@ import { Materials } from '../environment/Materials';
 import { CollisionWorld, RayHit } from './Collision';
 import { Effects } from './Effects';
 
-export type ProjKind = 'rocket' | 'dart' | 'bolt' | 'bomb';
+export type ProjKind = 'rocket' | 'dart' | 'bolt' | 'bomb' | 'frag' | 'flash';
 
 export interface Projectile {
   kind: ProjKind;
@@ -17,6 +17,10 @@ export interface Projectile {
   hostile: boolean;
   trailT: number;
   active: boolean;
+  /** id of the player who fired it (multiplayer), '' = local/AI */
+  owner: string;
+  /** purely visual copy of a remote player's projectile */
+  ghost: boolean;
 }
 
 export interface ProjectileHooks {
@@ -25,6 +29,7 @@ export interface ProjectileHooks {
   hitPlayer(p: Projectile): boolean;
   explode(p: Projectile, at: THREE.Vector3, normal: THREE.Vector3 | null): void;
   impact(p: Projectile, hit: RayHit): void;
+  bounce?(p: Projectile): void;
 }
 
 const tmpDir = new THREE.Vector3();
@@ -34,6 +39,7 @@ export class Projectiles {
   readonly group = new THREE.Group();
   list: Projectile[] = [];
   private pools = new Map<ProjKind, THREE.Object3D[]>();
+  onSpawn: (p: Projectile) => void = () => {};
 
   constructor(private mats: Materials, private world: CollisionWorld, private fx: Effects) {}
 
@@ -74,6 +80,34 @@ export class Projectiles {
       g.add(core);
       const halo = new THREE.Mesh(new THREE.SphereGeometry(0.45, 12, 8), new THREE.MeshBasicMaterial({ color: 0x40e0ff, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
       g.add(halo);
+    } else if (kind === 'frag') {
+      const green = this.mats.plastic(0x4f8f2a, 0.45);
+      const yel = this.mats.plastic(0xffcf33, 0.3);
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), green);
+      body.scale.set(1, 1.2, 1);
+      g.add(body);
+      for (let i = 0; i < 3; i++) {
+        const band = new THREE.Mesh(new THREE.TorusGeometry(0.27 - Math.abs(i - 1) * 0.06, 0.025, 6, 14), green);
+        band.rotation.x = Math.PI / 2;
+        band.position.y = (i - 1) * 0.14;
+        g.add(band);
+      }
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.12, 10), yel);
+      cap.position.y = 0.36;
+      g.add(cap);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.018, 6, 12), yel);
+      ring.position.set(0.12, 0.4, 0);
+      g.add(ring);
+    } else if (kind === 'flash') {
+      const white = this.mats.plastic(0xf6f6f2, 0.3);
+      const blue = this.mats.plastic(0x3fa9ff, 0.3);
+      const cube = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), white);
+      g.add(cube);
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.1, 0.42), blue);
+      g.add(stripe);
+      const lens = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(2, 2, 2.4), toneMapped: false }));
+      lens.position.set(0, 0.2, 0);
+      g.add(lens);
     } else {
       const m = this.mats.plastic(0x2a2d36, 0.4);
       const ball = new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 10), m);
@@ -89,7 +123,7 @@ export class Projectiles {
     return g;
   }
 
-  spawn(kind: ProjKind, pos: THREE.Vector3, vel: THREE.Vector3, damage: number, hostile: boolean) {
+  spawn(kind: ProjKind, pos: THREE.Vector3, vel: THREE.Vector3, damage: number, hostile: boolean, owner = '', ghost = false) {
     let pool = this.pools.get(kind);
     if (!pool) this.pools.set(kind, (pool = []));
     const mesh = pool.pop() ?? this.makeMesh(kind);
@@ -97,21 +131,25 @@ export class Projectiles {
     this.group.add(mesh);
     const p: Projectile = {
       kind, mesh, pos: pos.clone(), vel: vel.clone(), damage, hostile,
-      life: kind === 'bomb' ? 6 : 5,
-      radius: kind === 'bomb' ? 0.5 : kind === 'bolt' ? 0.3 : kind === 'rocket' ? 0.2 : 0.12,
-      gravity: kind === 'bomb' ? 22 : kind === 'dart' ? 2.5 : 0,
+      life: kind === 'bomb' ? 6 : kind === 'frag' ? 1.7 : kind === 'flash' ? 1.3 : 5,
+      radius: kind === 'bomb' ? 0.5 : kind === 'bolt' ? 0.3 : kind === 'rocket' ? 0.2 : kind === 'frag' || kind === 'flash' ? 0.3 : 0.12,
+      gravity: kind === 'bomb' ? 22 : kind === 'dart' ? 2.5 : kind === 'frag' || kind === 'flash' ? 28 : 0,
       trailT: 0,
       active: true,
+      owner,
+      ghost,
     };
     mesh.position.copy(pos);
     this.orient(p);
     this.list.push(p);
+    this.onSpawn(p);
     return p;
   }
 
   private orient(p: Projectile) {
-    if (p.kind === 'bomb') {
-      p.mesh.rotation.x += 0.1;
+    if (p.kind === 'bomb' || p.kind === 'frag' || p.kind === 'flash') {
+      p.mesh.rotation.x += 0.1 * Math.min(1, p.vel.length() / 10);
+      p.mesh.rotation.z += 0.07 * Math.min(1, p.vel.length() / 10);
       return;
     }
     tmpDir.copy(p.vel).normalize();
@@ -131,7 +169,7 @@ export class Projectiles {
       if (!p.active) continue;
       p.life -= dt;
       if (p.life <= 0) {
-        if (p.kind === 'rocket' || p.kind === 'bomb') hooks.explode(p, p.pos, null);
+        if (p.kind === 'rocket' || p.kind === 'bomb' || p.kind === 'frag' || p.kind === 'flash') hooks.explode(p, p.pos, null);
         this.release(p);
         continue;
       }
@@ -162,8 +200,31 @@ export class Projectiles {
         }
       }
 
+      // grenades bounce off everything until the fuse runs out
+      if (p.kind === 'frag' || p.kind === 'flash') {
+        if (hit) {
+          p.pos.copy(hit.point).addScaledVector(hit.normal, p.radius + 0.01);
+          const vn = p.vel.dot(hit.normal);
+          if (vn < 0) p.vel.addScaledVector(hit.normal, -1.45 * vn);
+          p.vel.multiplyScalar(hit.normal.y > 0.5 ? 0.62 : 0.75);
+          if (Math.abs(vn) > 2) hooks.bounce?.(p);
+        }
+        const g = this.world.groundAt(p.pos.x, p.pos.z, p.pos.y + 0.2);
+        if (p.pos.y < g + p.radius) {
+          p.pos.y = g + p.radius;
+          if (p.vel.y < 0) p.vel.y *= -0.4;
+          p.vel.x *= 0.92;
+          p.vel.z *= 0.92;
+        }
+        p.mesh.position.copy(p.pos);
+        this.orient(p);
+        continue;
+      }
+
       // entities
-      if (!p.hostile) {
+      if (p.ghost) {
+        // remote players' shots are drawn only; their owner resolves hits
+      } else if (!p.hostile) {
         if (hooks.hitEnemies(p, from, p.pos)) {
           this.release(p);
           continue;

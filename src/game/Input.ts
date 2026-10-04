@@ -14,7 +14,17 @@ export class Input {
   slot = -1;
   isTouch = false;
   sensitivity = 1;
+  /** extra look multiplier (lowered while scoped) */
+  lookScale = 1;
   enabled = false;
+  /** aim-down-sights held */
+  aim = false;
+  /** one-shot: ADS button released (mobile sniper fires on release) */
+  aimRelease = false;
+  throwFrag = false;
+  throwFlash = false;
+  private mouseAim = false;
+  private touchAim = false;
 
   private keys = new Set<string>();
   private touchMove = { x: 0, y: 0, active: false };
@@ -42,6 +52,10 @@ export class Input {
         case 'Digit1': this.slot = 0; break;
         case 'Digit2': this.slot = 1; break;
         case 'Digit3': this.slot = 2; break;
+        case 'Digit4': this.slot = 3; break;
+        case 'Digit5': this.slot = 4; break;
+        case 'KeyG': this.throwFrag = true; break;
+        case 'KeyT': this.throwFlash = true; break;
         case 'KeyQ': this.swap = 1; break;
       }
     });
@@ -60,17 +74,19 @@ export class Input {
         return;
       }
       if (e.button === 0) this.fire = true;
-      if (e.button === 2) this.melee = true;
+      if (e.button === 2) this.mouseAim = true;
+      if (e.button === 1) this.melee = true;
     });
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.fire = false;
+      if (e.button === 2) this.mouseAim = false;
     });
     window.addEventListener('mousemove', (e) => {
       if (!this.enabled || document.pointerLockElement !== canvas) return;
       // ignore absurd spikes some browsers emit on lock
       if (Math.abs(e.movementX) > 300 || Math.abs(e.movementY) > 300) return;
-      this.lookDX += e.movementX * 0.0022 * this.sensitivity;
-      this.lookDY += e.movementY * 0.0022 * this.sensitivity;
+      this.lookDX += e.movementX * 0.0027 * this.sensitivity * this.lookScale;
+      this.lookDY += e.movementY * 0.0027 * this.sensitivity * this.lookScale;
     });
     window.addEventListener('wheel', (e) => {
       if (!this.enabled || this.isTouch) return;
@@ -101,11 +117,15 @@ export class Input {
     this.touchSprint = active && Math.hypot(x, y) > 0.92 && y > 0.5;
   }
   addTouchLook(dx: number, dy: number) {
-    this.lookDX += dx * 0.0052 * this.sensitivity;
-    this.lookDY += dy * 0.0052 * this.sensitivity;
+    this.lookDX += dx * 0.0066 * this.sensitivity * this.lookScale;
+    this.lookDY += dy * 0.0066 * this.sensitivity * this.lookScale;
   }
   setTouchFire(v: boolean) {
     this.touchFire = v;
+  }
+  setTouchAim(v: boolean) {
+    if (this.touchAim && !v) this.aimRelease = true;
+    this.touchAim = v;
   }
   toggleCrouch() {
     this.touchCrouch = !this.touchCrouch;
@@ -130,6 +150,7 @@ export class Input {
     this.sprint = k.has('ShiftLeft') || k.has('ShiftRight') || this.touchSprint;
     this.crouch = k.has('KeyC') || k.has('ControlLeft') || this.touchCrouch;
     if (this.isTouch) this.fire = this.touchFire;
+    this.aim = this.mouseAim || this.touchAim;
   }
 
   /** Clear one-shot actions after the frame consumed them. */
@@ -141,6 +162,9 @@ export class Input {
     this.melee = false;
     this.swap = 0;
     this.slot = -1;
+    this.aimRelease = false;
+    this.throwFrag = false;
+    this.throwFlash = false;
   }
 
   reset() {
@@ -148,6 +172,8 @@ export class Input {
     this.fire = false;
     this.touchFire = false;
     this.touchCrouch = false;
+    this.touchAim = false;
+    this.mouseAim = false;
     this.touchMove.active = false;
     this.endFrame();
   }

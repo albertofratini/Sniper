@@ -103,6 +103,42 @@ export class Audio {
     this.tone('sine', 220 * p, 60, 0.08, 0.35);
     this.burst(0.05, 0.25, 'highpass', 3000, 1500);
   }
+  weapon(kind: 'blaster' | 'shotgun' | 'rocket' | 'sniper' | 'minigun') {
+    if (kind === 'blaster') this.blaster();
+    else if (kind === 'shotgun') this.shotgun();
+    else if (kind === 'rocket') this.rocket();
+    else if (kind === 'sniper') this.sniper();
+    else this.minigun();
+  }
+  sniper() {
+    if (!this.ok('sniper', 0.1)) return;
+    this.tone('square', 2200, 200, 0.12, 0.25);
+    this.tone('sine', 180, 40, 0.4, 0.7);
+    this.burst(0.5, 0.6, 'lowpass', 5000, 150);
+    // bolt cycle
+    this.burst(0.04, 0.35, 'bandpass', 2600, 2200, 0.45, 6);
+    this.burst(0.05, 0.35, 'bandpass', 1800, 1500, 0.62, 6);
+  }
+  minigun() {
+    if (!this.ok('minigun', 0.035)) return;
+    const p = 1 + (Math.random() - 0.5) * 0.1;
+    this.tone('square', 900 * p, 260 * p, 0.05, 0.12);
+    this.burst(0.04, 0.2, 'bandpass', 1800, 900, 0, 2);
+  }
+  throwWhoosh() {
+    if (!this.ok('throw', 0.1)) return;
+    this.burst(0.2, 0.25, 'bandpass', 500, 1800, 0, 2);
+  }
+  bounce() {
+    if (!this.ok('bounce', 0.06)) return;
+    this.tone('sine', 700 + Math.random() * 300, 400, 0.06, 0.15);
+  }
+  flashbang(dist = 10) {
+    if (!this.ok('flash', 0.1)) return;
+    const v = Math.max(0.2, Math.min(1, 25 / (dist + 5)));
+    this.burst(0.25, 0.8 * v, 'highpass', 3000, 1500);
+    this.tone('sine', 3200, 3000, 2.2, 0.08 * v, 0.1);
+  }
   shotgun() {
     if (!this.ok('shotgun', 0.05)) return;
     this.burst(0.28, 0.8, 'lowpass', 3000, 200);

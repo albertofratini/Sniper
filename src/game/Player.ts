@@ -40,6 +40,14 @@ export class Player {
   hurtFlash = 0;
   lookDelta = new THREE.Vector2();
   godMode = false;
+  /** seconds since last damage (drives health regen) */
+  sinceHurt = 99;
+  regenDelay = 3.5;
+  regenRate = 14;
+  /** zoomed FOV while scoped (null = not zoomed) */
+  zoomFov: number | null = null;
+  speedMul = 1;
+  private camY = 0;
   onDamage: (amount: number, from?: THREE.Vector3) => void = () => {};
   moveIntent = new THREE.Vector2();
 
@@ -58,6 +66,9 @@ export class Player {
     this.invuln = 1.0;
     this.trauma = 0;
     this.recoilPitch = this.recoilYaw = 0;
+    this.camY = p.y;
+    this.sinceHurt = 99;
+    this.zoomFov = null;
     this.height = 1.8;
     this.crouching = false;
   }
@@ -86,6 +97,7 @@ export class Player {
   damage(amount: number, from?: THREE.Vector3) {
     if (!this.alive || this.invuln > 0) return false;
     if (!this.godMode) this.health = Math.max(0, this.health - amount);
+    this.sinceHurt = 0;
     this.onDamage(amount, from);
     this.hurtFlash = Math.min(1, this.hurtFlash + 0.35 + amount / 40);
     this.shake(0.25 + amount / 60);
@@ -110,6 +122,11 @@ export class Player {
 
   update(dt: number, input: Input, weaponSpeedMul: number) {
     this.invuln = Math.max(0, this.invuln - dt);
+    // health regeneration after a short break from taking damage
+    this.sinceHurt += dt;
+    if (this.alive && this.sinceHurt > this.regenDelay && this.health < this.maxHealth) {
+      this.health = Math.min(this.maxHealth, this.health + this.regenRate * dt);
+    }
     this.hurtFlash = Math.max(0, this.hurtFlash - dt * 1.8);
 
     // ---- look
@@ -138,7 +155,7 @@ export class Player {
     this.moveIntent.set(mx, my);
     this.sprinting = input.sprint && my > 0.3 && !this.crouching && this.alive;
     let maxSpeed = this.crouching ? 4.8 : this.sprinting ? 14.5 : 9.5;
-    maxSpeed *= weaponSpeedMul;
+    maxSpeed *= weaponSpeedMul * this.speedMul;
     const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const wish = fwd.multiplyScalar(my).addScaledVector(right, mx);
@@ -172,7 +189,7 @@ export class Player {
     const wasGrounded = this.grounded;
     const preVy = this.vel.y;
     if (!wasGrounded) this.fallStartVel = Math.min(this.fallStartVel, preVy);
-    this.grounded = this.world.moveCylinder(this.pos, this.vel, dt, this.radius, this.height, 0.6);
+    this.grounded = this.world.moveCylinder(this.pos, this.vel, dt, this.radius, this.height, 0.6, wasGrounded ? 0.45 : 0.02);
     if (this.grounded && !wasGrounded) {
       const impact = Math.min(1, -this.fallStartVel / 30);
       this.landVel -= 2.5 * impact + 0.3;
@@ -215,7 +232,10 @@ export class Player {
     const bobY = Math.sin(this.bobPhase * 2) * 0.045 * this.bobAmt * (this.sprinting ? 1.5 : 1);
     const bobX = Math.cos(this.bobPhase) * 0.03 * this.bobAmt;
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
-    c.position.set(this.pos.x, this.pos.y + this.eye + bobY + this.landDip * 0.25, this.pos.z).addScaledVector(right, bobX);
+    // smooth out small height changes (step-ups, slope snapping) while grounded; follow exactly in the air
+    if (this.grounded && Math.abs(this.pos.y - this.camY) < 1.2) this.camY += (this.pos.y - this.camY) * Math.min(1, dt * 18);
+    else this.camY = this.pos.y;
+    c.position.set(this.pos.x, this.camY + this.eye + bobY + this.landDip * 0.25, this.pos.z).addScaledVector(right, bobX);
     const sh = this.trauma * this.trauma;
     const t = this.time * 40;
     const shx = (Math.sin(t * 1.3) + Math.sin(t * 2.7) * 0.5) * 0.03 * sh;
@@ -225,8 +245,8 @@ export class Player {
       this.yaw + this.recoilYaw + shx,
       this.roll + Math.cos(this.bobPhase) * 0.004 * this.bobAmt + shx * 0.5 - this.lookDelta.x * 0.0,
     );
-    const fovT = this.baseFov + (this.sprinting ? 7 * this.speed01 : 0);
-    c.fov += (fovT - c.fov) * Math.min(1, dt * 6);
+    const fovT = this.zoomFov ?? this.baseFov + (this.sprinting ? 7 * this.speed01 : 0);
+    c.fov += (fovT - c.fov) * Math.min(1, dt * (this.zoomFov ? 18 : 6));
     c.updateProjectionMatrix();
     c.updateMatrixWorld();
   }

@@ -5,9 +5,9 @@ interface WaveDef { title: string; sub: string; groups: Group[]; maxAlive: numbe
 
 export const WAVES: WaveDef[] = [
   { title: 'WAVE 1', sub: 'The Red Brigade marches in', maxAlive: 7, interval: 1.2, groups: [{ type: 'trooper', count: 10 }] },
-  { title: 'WAVE 2', sub: 'Something is skittering…', maxAlive: 14, interval: 1.0, groups: [{ type: 'trooper', count: 8 }, { type: 'bug', count: 18, burst: 6, delay: 3 }] },
+  { title: 'WAVE 2', sub: 'Wind-up mice are loose!', maxAlive: 12, interval: 1.0, groups: [{ type: 'trooper', count: 8 }, { type: 'bug', count: 10, burst: 5, delay: 3 }] },
   { title: 'WAVE 3', sub: 'Clank Bots are wound up', maxAlive: 12, interval: 1.1, groups: [{ type: 'trooper', count: 10, hard: true }, { type: 'robot', count: 3, delay: 4 }] },
-  { title: 'WAVE 4', sub: 'Chompers smell plastic', maxAlive: 14, interval: 1.0, groups: [{ type: 'chomper', count: 8 }, { type: 'robot', count: 3, delay: 6 }, { type: 'bug', count: 6, burst: 6, delay: 12 }] },
+  { title: 'WAVE 4', sub: 'Chompers smell plastic', maxAlive: 14, interval: 1.0, groups: [{ type: 'chomper', count: 8 }, { type: 'robot', count: 3, delay: 6 }, { type: 'bug', count: 4, burst: 4, delay: 12 }] },
   { title: 'FINAL WAVE', sub: 'ALL HAIL THE WIND-UP KING', maxAlive: 10, interval: 2.2, groups: [{ type: 'boss', count: 1 }, { type: 'trooper', count: 6, hard: true, delay: 6 }, { type: 'chomper', count: 4, delay: 14 }] },
 ];
 
@@ -53,6 +53,17 @@ export class WaveManager {
     }
     this.queue.sort((a, b) => a.at - b.at);
     this.events.waveStart(i);
+  }
+
+  /** Continue a wave already in progress (co-op host migration). */
+  resume(wave: number, killed: number, total: number, alive: number) {
+    this.wave = wave;
+    this.state = 'fighting';
+    this.queue = [];
+    this.total = total;
+    this.killed = Math.max(killed, total - alive);
+    this.extraSpawned = 0;
+    this.fightTime = 99;
   }
 
   get remaining() {

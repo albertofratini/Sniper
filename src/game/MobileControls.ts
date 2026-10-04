@@ -83,6 +83,12 @@ export class MobileControls {
             this.input.setTouchFire(true);
             lookStart(e, btn); // drag on FIRE also aims
             break;
+          case 'aim':
+            this.input.setTouchAim(true);
+            lookStart(e, btn); // drag on AIM also looks
+            break;
+          case 'frag': this.input.throwFrag = true; break;
+          case 'flash': this.input.throwFlash = true; break;
           case 'jump': this.input.jump = true; break;
           case 'reload': this.input.reload = true; break;
           case 'melee': this.input.melee = true; break;
@@ -99,8 +105,12 @@ export class MobileControls {
           this.input.setTouchFire(false);
           lookEnd(e);
         }
+        if (act === 'aim') {
+          this.input.setTouchAim(false);
+          lookEnd(e);
+        }
       };
-      if (act === 'fire') btn.addEventListener('pointermove', lookMove);
+      if (act === 'fire' || act === 'aim') btn.addEventListener('pointermove', lookMove);
       btn.addEventListener('pointerup', up);
       btn.addEventListener('pointercancel', up);
       btn.addEventListener('lostpointercapture', up);

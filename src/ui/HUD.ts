@@ -51,8 +51,9 @@ export class HUD {
     this.set('wp', v, () => (this.el.waveFill.style.width = `${v}%`));
   }
 
-  enemies(n: number) {
+  enemies(n: number, label = 'ENEMIES') {
     this.set('en', n, () => (this.el.enemies.textContent = String(n)));
+    this.set('enl', label, () => (this.el.enemies.previousElementSibling!.textContent = label));
   }
 
   score(n: number) {
@@ -70,7 +71,11 @@ export class HUD {
     });
   }
 
-  weapon(index: number, name: string, mag: number, reserve: number, reloading: boolean) {
+  weapon(index: number, name: string, mag: number, reserve: number, reloading: boolean, owned?: boolean[], allowed?: number[] | null) {
+    if (owned) {
+      const key = owned.map((o, i) => (o && (!allowed || allowed.includes(i)) ? 1 : 0)).join('');
+      this.set('owned', key, () => this.el.slots.forEach((sl, i) => sl.classList.toggle('hidden', key[i] !== '1')));
+    }
     this.set('wn', name, () => (this.el.wName.textContent = name));
     this.set('mag', mag, () => {
       this.el.mag.textContent = String(mag);
@@ -153,10 +158,89 @@ export class HUD {
     }
   }
 
+  private overlay(id: string, css: string, html = '') {
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      el.style.cssText = css;
+      el.innerHTML = html;
+      this.el.hud.appendChild(el);
+    }
+    return el;
+  }
+
+  flashbang(a: number) {
+    const v = Math.round(a * 50) / 50;
+    this.set('fb', v, () => {
+      const el = this.overlay('flash-ov', 'position:absolute;inset:0;background:#fff;pointer-events:none;opacity:0;z-index:5');
+      el.style.opacity = String(Math.min(1, v * 1.1));
+    });
+  }
+
+  scope(on: boolean) {
+    this.set('scope', on, () => {
+      const el = this.overlay(
+        'scope-ov',
+        'position:absolute;inset:0;pointer-events:none;display:none;z-index:4;background:radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 0, rgba(0,0,0,0) min(38vh,38vw), #07060a calc(min(38vh,38vw) + 2px))',
+        '<div style="position:absolute;left:50%;top:50%;width:min(76vh,76vw);height:min(76vh,76vw);transform:translate(-50%,-50%);border-radius:50%;box-shadow:inset 0 0 40px rgba(0,0,0,.6), 0 0 0 4px #111">' +
+          '<div style="position:absolute;left:0;right:0;top:50%;height:2px;background:rgba(10,10,10,.85)"></div>' +
+          '<div style="position:absolute;top:0;bottom:0;left:50%;width:2px;background:rgba(10,10,10,.85)"></div>' +
+          '<div style="position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px;border-radius:50%;background:#ff3b30"></div></div>',
+      );
+      el.style.display = on ? 'block' : 'none';
+      this.el.cross.style.visibility = on ? 'hidden' : 'visible';
+    });
+  }
+
+  nades(frag: number, flash: number) {
+    this.set('nades', `${frag}/${flash}`, () => {
+      const el = this.overlay('nade-hud', 'display:flex;gap:8px;justify-content:flex-end;margin-top:6px;font-size:16px');
+      if (!el.parentElement?.classList.contains('hud-bottomright')) document.querySelector('.hud-bottomright')!.appendChild(el);
+      el.innerHTML = `<span style="opacity:${frag ? 1 : 0.35}">💣 ${frag}</span><span style="opacity:${flash ? 1 : 0.35}">✨ ${flash}</span>`;
+      const fc = document.getElementById('frag-count');
+      const lc = document.getElementById('flash-count');
+      if (fc) fc.textContent = String(frag);
+      if (lc) lc.textContent = String(flash);
+      document.getElementById('btn-frag')?.classList.toggle('empty', frag === 0);
+      document.getElementById('btn-flash')?.classList.toggle('empty', flash === 0);
+    });
+  }
+
+  sniperButton(on: boolean) {
+    this.set('snbtn', on, () => document.getElementById('btn-aim')?.classList.toggle('hidden', !on));
+  }
+
+  respawn(t: number) {
+    const v = Math.ceil(t);
+    this.set('resp', v, () => {
+      const el = this.overlay('respawn-ov', 'position:absolute;left:0;right:0;top:46%;text-align:center;font-size:24px;color:#fff;text-shadow:0 3px 0 rgba(0,0,0,.5);display:none');
+      el.style.display = v > 0 ? 'block' : 'none';
+      el.textContent = `RESPAWNING IN ${v}`;
+    });
+  }
+
+  killFeed(items: { killer: string; victim: string; weapon: string; t: number }[]) {
+    const el = this.overlay('killfeed', 'position:absolute;left:calc(14px + var(--sal));top:calc(110px + var(--sat));display:flex;flex-direction:column;gap:4px;font-family:var(--body);font-weight:900;font-size:13px');
+    const esc = (x: string) => x.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
+    el.innerHTML = items
+      .slice(-4)
+      .map((k) => `<div class="kf" style="background:rgba(20,12,30,.55);padding:3px 10px;border-radius:8px">${esc(k.killer)} <span style="color:#ffcf33">[${esc(k.weapon)}]</span> ${esc(k.victim)}</div>`)
+      .join('');
+    clearTimeout(this.feedTimer);
+    this.feedTimer = window.setTimeout(() => (el.innerHTML = ''), 6000);
+  }
+  private feedTimer = 0;
+
   reset() {
     this.cache.clear();
     this.boss(null);
     this.el.banner.classList.remove('show');
     this.el.dirs.innerHTML = '';
+    for (const id of ['flash-ov', 'scope-ov', 'respawn-ov', 'killfeed']) {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+    }
+    this.el.cross.style.visibility = 'visible';
   }
 }

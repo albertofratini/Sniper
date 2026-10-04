@@ -9,8 +9,25 @@ import { audio } from './Audio';
 
 export type EnemyType = 'trooper' | 'robot' | 'chomper' | 'bug' | 'boss';
 
+/** Anything enemies can chase and hurt: the local player or a remote co-op player. */
+export interface Target {
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  yaw: number;
+  height: number;
+  alive: boolean;
+  readonly centerPos: THREE.Vector3;
+  readonly headPos: THREE.Vector3;
+  damage(amount: number, from?: THREE.Vector3): boolean;
+  knock(dir: THREE.Vector3, force: number): void;
+  shake(amount: number): void;
+}
+
 export interface EnemyCtx {
-  player: Player;
+  /** the target this enemy is currently going after */
+  player: Target;
+  /** the local listener (for sound panning) */
+  listener: Player;
   world: CollisionWorld;
   nav: NavGrid;
   fx: Effects;
@@ -37,7 +54,10 @@ const UP = new THREE.Vector3(0, 1, 0);
 let blobGeo: THREE.PlaneGeometry | null = null;
 let blobMat: THREE.MeshBasicMaterial | null = null;
 
-function panFor(player: Player, p: THREE.Vector3) {
+let listener: Player | null = null;
+function panFor(_t: Target, p: THREE.Vector3) {
+  const player = listener;
+  if (!player) return 0;
   const right = v2.set(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
   const d = v1.subVectors(p, player.pos).normalize();
   return Math.max(-1, Math.min(1, d.dot(right)));
@@ -77,6 +97,16 @@ export abstract class Enemy {
   /** pieces that pop off on death */
   protected detach: THREE.Object3D[] = [];
   knockResist = 1;
+  /** flash-cube stun time */
+  stun = 0;
+  /** network id (co-op) */
+  netId = 0;
+  /** mirrored from another player's simulation: no AI, just interpolation */
+  puppet = false;
+  netPos = new THREE.Vector3();
+  netYaw = 0;
+  /** last player id that damaged it (co-op kill credit) */
+  lastHitBy = '';
 
   constructor(protected mats: Materials) {
     this.group.add(this.body);
@@ -133,6 +163,11 @@ export abstract class Enemy {
       if (m.isMesh) m.geometry.dispose();
     });
     for (const m of this.flashMats) m.dispose();
+  }
+
+  /** local hit feedback without applying damage (co-op clients) */
+  hitFx() {
+    this.flash = 1;
   }
 
   updateHitSpheres() {
@@ -251,15 +286,35 @@ export abstract class Enemy {
       this.vel.x *= 1 - Math.min(1, dt * 3);
       this.vel.z *= 1 - Math.min(1, dt * 3);
     }
-    this.grounded = ctx.world.moveCylinder(this.pos, this.vel, dt, this.radius, this.height, 0.6);
+    this.grounded = ctx.world.moveCylinder(this.pos, this.vel, dt, this.radius, this.height, 0.6, this.grounded ? 0.35 : 0.02);
   }
 
   update(dt: number, ctx: EnemyCtx) {
     this.anim += dt;
     this.spawnT += dt;
     this.stagger = Math.max(0, this.stagger - dt);
-    this.think(dt, ctx);
-    this.physics(ctx, dt);
+    listener = ctx.listener;
+    if (this.puppet) {
+      const prev = this.pos.clone();
+      this.pos.lerp(this.netPos, Math.min(1, dt * 12));
+      let dy = this.netYaw - this.yaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      this.yaw += dy * Math.min(1, dt * 12);
+      const sp = prev.distanceTo(this.pos) / Math.max(dt, 1e-4);
+      this.body.position.y = Math.abs(Math.sin(this.anim * 9)) * Math.min(0.3, sp * 0.03);
+      this.body.rotation.z = Math.sin(this.anim * 9) * Math.min(0.1, sp * 0.01);
+    } else if (this.stun > 0) {
+      this.stun -= dt;
+      this.vel.x *= 0.9;
+      this.vel.z *= 0.9;
+      this.body.rotation.z = Math.sin(this.anim * 25) * 0.15;
+      this.body.rotation.x = Math.sin(this.anim * 17) * 0.1;
+      this.physics(ctx, dt);
+    } else {
+      this.think(dt, ctx);
+      this.physics(ctx, dt);
+    }
 
     // pop-in
     let s = 1;
@@ -869,7 +924,7 @@ export class Bug extends Enemy {
     this.radius = 0.32;
     this.height = 0.5;
     this.hp = this.maxHp = 10;
-    this.speed = 9 + Math.random() * 2;
+    this.speed = 5 + Math.random() * 1.2;
     this.score = 40;
     const sm = this.mat(shell, 0.25);
     const dark = this.mat(0x2a2d36, 0.5);
@@ -910,8 +965,8 @@ export class Bug extends Enemy {
     this.body.rotation.z = Math.sin(this.anim * 30) * 0.08;
     if (Math.random() < 0.004) audio.chitter(panFor(pl, this.pos));
     if (dist < this.radius + 0.75 && Math.abs(pl.pos.y - this.pos.y) < 1.2 && this.biteCd <= 0) {
-      this.biteCd = 0.7;
-      pl.damage(5, this.pos);
+      this.biteCd = 0.9;
+      pl.damage(4, this.pos);
       this.vel.addScaledVector(this.moveDir, -6);
       this.vel.y = 4;
     }
@@ -1033,8 +1088,8 @@ export class Boss extends Enemy {
       this.state = 'summon';
       this.stateT = 1.4;
       audio.bossRoar();
-      for (let i = 0; i < 7; i++) {
-        const a = (i / 7) * Math.PI * 2;
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
         ctx.spawn('bug', this.pos.clone().add(new THREE.Vector3(Math.cos(a) * 4, 0, Math.sin(a) * 4)));
       }
       if (this.summoned === 2) for (let i = 0; i < 2; i++) ctx.spawn('chomper', this.pos.clone().add(new THREE.Vector3(i ? 5 : -5, 0, 2)));

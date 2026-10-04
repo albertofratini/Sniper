@@ -11,6 +11,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#1a1220" />
     <title>Toy Troopers</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%235c8a2e'/%3E%3Cpath d='M18 36h28v8H18z' fill='%23f6c42c'/%3E%3Ccircle cx='32' cy='24' r='10' fill='%23f6c42c'/%3E%3C/svg%3E" />
   </head>
   <body>
@@ -44,7 +46,7 @@
         <div class="hud-bottomright">
           <div id="weapon-name">ASSAULT BLASTER</div>
           <div id="ammo"><b id="ammo-mag">30</b><span id="ammo-res">/ ∞</span></div>
-          <div id="weapon-slots"><span data-w="0">1</span><span data-w="1">2</span><span data-w="2">3</span></div>
+          <div id="weapon-slots"><span data-w="0">1</span><span data-w="1">2</span><span data-w="2">3</span><span data-w="3">4</span><span data-w="4">5</span></div>
           <div id="reload-hint" class="hidden">RELOADING</div>
         </div>
         <div id="banner"></div>
@@ -63,6 +65,9 @@
           <button class="tbtn" id="btn-melee" data-act="melee"><span>BASH</span></button>
           <button class="tbtn" id="btn-swap" data-act="swap"><span>SWAP</span></button>
           <button class="tbtn" id="btn-crouch" data-act="crouch"><span>DUCK</span></button>
+          <button class="tbtn hidden" id="btn-aim" data-act="aim"><span>SCOPE</span></button>
+          <button class="tbtn nade" id="btn-frag" data-act="frag"><span>💣</span><i id="frag-count">0</i></button>
+          <button class="tbtn nade" id="btn-flash" data-act="flash"><span>✨</span><i id="flash-count">0</i></button>
         </div>
       </div>
 
@@ -74,14 +79,22 @@
             <div class="logo-bottom">TROOPERS</div>
           </div>
           <div class="tagline">SURVIVE THE BEDROOM</div>
-          <button id="play-btn" class="big-btn">PLAY</button>
+          <div id="invite" class="hidden">You're invited to room <b id="invite-code"></b></div>
+          <div class="menu-buttons">
+            <button id="play-btn" class="big-btn">PLAY SOLO</button>
+            <button id="friends-btn" class="big-btn alt">PLAY WITH FRIENDS</button>
+          </div>
+          <div class="menu-row">
+            <button id="fs-btn" class="small-btn">⛶ FULLSCREEN</button>
+          </div>
+          <div id="ios-hint" class="hidden">iPhone tip: tap <b>Share</b> → <b>Add to Home Screen</b>, then open Toy Troopers from your home screen to play fullscreen.</div>
           <div id="loading">Unpacking toys…</div>
           <div class="controls-hint desktop-only">
-            WASD move · Mouse look · Click fire · Shift sprint · Space jump · C crouch<br />
-            R reload · F bash · 1/2/3 or wheel switch weapon · Esc pause
+            WASD move · Mouse look · Click fire · Right-click scope · Shift sprint · Space jump · C crouch<br />
+            R reload · F bash · G grenade · T flash cube · 1–5 or wheel switch weapon · Esc pause
           </div>
           <div class="controls-hint touch-only">
-            Left thumb: move (push far to sprint) · Right thumb: look · Hold FIRE and drag to aim
+            Left thumb: move (push far to sprint) · Right thumb: look · Hold FIRE and drag to aim · Sniper: hold SCOPE, release to shoot
           </div>
         </div>
       </div>
@@ -92,6 +105,7 @@
           <div class="title-sm">PAUSED</div>
           <button id="resume-btn" class="big-btn">RESUME</button>
           <button id="restart-btn2" class="small-btn">RESTART</button>
+          <button id="quit-btn" class="small-btn">QUIT TO MENU</button>
           <label class="sens">LOOK SENSITIVITY <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1" /></label>
         </div>
       </div>
@@ -104,6 +118,46 @@
           <button id="restart-btn" class="big-btn">PLAY AGAIN</button>
         </div>
       </div>
+
+      <!-- Multiplayer lobby -->
+      <div id="lobby" class="screen hidden">
+        <div class="lobby-card">
+          <div class="lobby-col">
+            <div class="lobby-title">ROOM <span id="room-code">------</span></div>
+            <div class="share-row">
+              <input id="room-link" readonly aria-label="Room link" />
+              <button id="copy-link" class="chip-btn">COPY</button>
+              <button id="share-link" class="chip-btn">SHARE</button>
+            </div>
+            <label class="field">YOUR NAME <input id="player-name" maxlength="14" autocomplete="off" /></label>
+            <div class="lobby-sub">PLAYERS</div>
+            <div id="player-list"></div>
+            <p class="hint">You don't have to wait here. Send the link, then close this page or play solo. When a friend opens the link you'll get a ping, and anyone in the room can press START once 2+ players are in.</p>
+          </div>
+          <div class="lobby-col">
+            <div class="lobby-sub">GAME MODE</div>
+            <div id="mode-list"></div>
+            <div id="team-size" class="hidden"><button data-size="2" class="chip-btn">2 v 2</button><button data-size="3" class="chip-btn">3 v 3</button></div>
+            <div id="lobby-status">Waiting for friends…</div>
+            <button id="start-match" class="big-btn" disabled>START</button>
+            <div class="lobby-actions">
+              <button id="solo-wait" class="small-btn">PLAY SOLO WHILE WAITING</button>
+              <button id="leave-room" class="small-btn">LEAVE ROOM</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Match results -->
+      <div id="mp-end" class="screen hidden">
+        <div class="menu-inner">
+          <div id="mp-end-title" class="title-sm">MATCH OVER</div>
+          <div id="mp-end-lines"></div>
+          <div class="hint">Back to the room in a few seconds…</div>
+        </div>
+      </div>
+
+      <div id="join-toast" class="hidden"><span id="join-toast-text"></span><button id="join-toast-btn" class="chip-btn">OPEN ROOM</button></div>
 
       <div id="rotate" class="hidden">
         <div class="rotate-phone"></div>

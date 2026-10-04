@@ -152,7 +152,7 @@ body.is-touch .desktop-only { display: none !important; }
 @keyframes hitdir { from { opacity: 1; } to { opacity: 0; } }
 
 /* ---------- Touch controls ---------- */
-#touch { position: absolute; inset: 0; pointer-events: none; }
+#touch { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
 #look-zone { position: absolute; top: 0; bottom: 0; right: 0; width: 60%; pointer-events: auto; touch-action: none; }
 #move-zone { position: absolute; top: 25%; bottom: 0; left: 0; width: 42%; pointer-events: auto; touch-action: none; }
 #stick-base {
@@ -274,3 +274,87 @@ body.is-touch .hud-bottomright { right: auto; left: 50%; transform: translateX(-
 body.is-touch #weapon-slots { justify-content: center; }
 body.is-touch #ammo { font-size: 34px; }
 body.is-touch .hud-top { top: calc(6px + var(--sat)); }
+
+/* ---------- Menu additions ---------- */
+.menu-buttons { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+.big-btn.alt {
+  background: linear-gradient(180deg, #9be37a, #4fae2e); box-shadow: 0 8px 0 #2f7a18, 0 14px 24px rgba(0,0,0,.45);
+  font-size: 28px; padding: 18px 30px 12px;
+}
+.big-btn.alt:active { box-shadow: 0 2px 0 #2f7a18; }
+.menu-row { display: flex; gap: 10px; justify-content: center; }
+#invite { font-weight: 900; background: rgba(255,207,51,.18); border: 2px solid var(--toy-yellow); padding: 6px 14px; border-radius: 12px; }
+#invite b { color: var(--toy-yellow); letter-spacing: 2px; }
+#ios-hint { font-size: 13px; font-weight: 700; max-width: 440px; opacity: .9; background: rgba(0,0,0,.3); padding: 8px 12px; border-radius: 10px; }
+.chip-btn {
+  font-family: var(--display); font-size: 15px; letter-spacing: 1px; color: #fff; cursor: pointer;
+  padding: 8px 14px 5px; border-radius: 12px; border: 2px solid rgba(255,255,255,.6); background: rgba(255,255,255,.12);
+}
+.chip-btn.on { background: var(--toy-yellow); color: var(--ink); border-color: #fff; }
+.hint { font-size: 12px; font-weight: 700; opacity: .75; line-height: 1.5; max-width: 420px; margin: 0; }
+
+/* ---------- Lobby ---------- */
+#lobby { place-items: stretch; overflow-y: auto; }
+.lobby-card {
+  margin: auto; width: min(980px, 100%); display: grid; grid-template-columns: 1fr 1fr; gap: 22px;
+  background: rgba(20, 12, 30, .72); border: 3px solid rgba(255,255,255,.25); border-radius: 22px; padding: 18px 20px;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.lobby-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.lobby-title { font-family: var(--display); font-size: 30px; color: #fff; }
+.lobby-title span { color: var(--toy-yellow); letter-spacing: 3px; }
+.lobby-sub { font-family: var(--display); font-size: 14px; letter-spacing: 2px; opacity: .8; }
+.share-row { display: flex; gap: 6px; min-width: 0; }
+.share-row input, .field input {
+  flex: 1; min-width: 0; font: 700 14px var(--body); color: #fff; background: rgba(0,0,0,.35);
+  border: 2px solid rgba(255,255,255,.35); border-radius: 10px; padding: 8px 10px; -webkit-user-select: text; user-select: text;
+}
+.field { display: flex; align-items: center; gap: 10px; font-family: var(--display); font-size: 14px; letter-spacing: 1px; }
+#player-list { display: flex; flex-direction: column; gap: 6px; }
+.pl-row { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,.08); border-radius: 10px; padding: 6px 10px; font-weight: 900; }
+.pl-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; flex: none; }
+.pl-row small { margin-left: auto; opacity: .7; font-size: 11px; }
+#mode-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mode-btn {
+  text-align: left; cursor: pointer; color: #fff; border-radius: 14px; padding: 8px 10px;
+  border: 2px solid rgba(255,255,255,.3); background: rgba(255,255,255,.07); font-family: var(--body);
+}
+.mode-btn b { display: block; font-family: var(--display); font-weight: 400; font-size: 16px; letter-spacing: 1px; }
+.mode-btn span { font-size: 11px; font-weight: 700; opacity: .8; }
+.mode-btn.on { border-color: var(--toy-yellow); background: rgba(255,207,51,.2); }
+#team-size { display: flex; gap: 8px; }
+#lobby-status { font-weight: 900; color: var(--toy-yellow); }
+.lobby-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.lobby-actions .small-btn { font-size: 14px; padding: 8px 14px 5px; }
+#start-match { font-size: 30px; padding: 12px 40px 8px; }
+@media (max-width: 720px), (max-height: 430px) {
+  .lobby-card { gap: 12px; padding: 12px 14px; border-radius: 16px; }
+  .lobby-title { font-size: 22px; }
+  #mode-list { gap: 6px; }
+  .mode-btn { padding: 6px 8px; }
+  .mode-btn b { font-size: 13px; }
+  .mode-btn span { display: none; }
+  #start-match { font-size: 24px; padding: 8px 28px 5px; }
+  .hint { font-size: 11px; }
+}
+@media (max-width: 560px) and (orientation: portrait) { .lobby-card { grid-template-columns: 1fr; } }
+
+#mp-end-lines { font-weight: 900; line-height: 1.8; font-size: 16px; }
+#join-toast {
+  position: absolute; left: 50%; top: calc(64px + var(--sat)); transform: translateX(-50%); z-index: 30;
+  display: flex; gap: 10px; align-items: center; background: rgba(20,12,30,.85); border: 2px solid var(--toy-yellow);
+  border-radius: 14px; padding: 8px 12px; font-weight: 900; white-space: nowrap;
+}
+
+/* ---------- New touch buttons ---------- */
+#btn-aim { width: 70px; height: 70px; right: calc(34px + var(--sar)); bottom: calc(184px + var(--sab)); font-size: 12px; background: rgba(63,169,255,.4); }
+#btn-aim.pressed { background: rgba(63,169,255,.8); }
+body.is-touch #btn-melee { right: calc(128px + var(--sar)); bottom: calc(192px + var(--sab)); width: 56px; height: 56px; }
+body.is-touch #btn-swap { right: calc(248px + var(--sar)); bottom: calc(222px + var(--sab)); width: 54px; height: 54px; }
+.tbtn.nade { width: 52px; height: 52px; font-size: 20px; }
+.tbtn.nade i { position: absolute; right: -4px; top: -4px; font-style: normal; font-size: 12px; background: var(--toy-red); border-radius: 10px; padding: 2px 6px 0; border: 2px solid #fff; }
+.tbtn.nade.empty { opacity: .35; }
+#btn-frag { right: calc(249px + var(--sar)); bottom: calc(90px + var(--sab)); }
+#btn-flash { right: calc(249px + var(--sar)); bottom: calc(154px + var(--sab)); }
+#btn-crouch { right: calc(248px + var(--sar)); bottom: calc(22px + var(--sab)); }
+#weapon-slots span.hidden { display: none !important; }

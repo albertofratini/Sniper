@@ -97,10 +97,8 @@ export class Builder {
     if (!l) map.set(kind, (l = []));
     l.push(g);
     if (opts.collide) {
-      g.computeBoundingBox();
-      tmpBox.copy(g.boundingBox!);
-      const pad = (opts.pad ?? 0) * CM;
-      this.world.add(tmpBox.min.x - pad, tmpBox.min.y, tmpBox.min.z - pad, tmpBox.max.x + pad, tmpBox.max.y, tmpBox.max.z + pad);
+      geo.computeBoundingBox();
+      this.addOrientedCollider(geo.boundingBox!, mat, (opts.pad ?? 0) * CM);
     }
     return g;
   }
@@ -122,9 +120,7 @@ export class Builder {
 
   /** Collision-only box in local cm (current transform translation+scale only). */
   collider(x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) {
-    const a = new THREE.Vector3(x0, y0, z0).applyMatrix4(this.m);
-    const b = new THREE.Vector3(x1, y1, z1).applyMatrix4(this.m);
-    this.world.add(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.min(a.z, b.z), Math.max(a.x, b.x), Math.max(a.y, b.y), Math.max(a.z, b.z));
+    this.addOrientedCollider(new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1)), this.m, 0);
   }
 
   /** A separate mesh with its own (textured) material. Geometry in local cm. */
@@ -145,10 +141,44 @@ export class Builder {
     this.group.add(mesh);
     if (opts.collide) {
       geo.computeBoundingBox();
-      tmpBox.copy(geo.boundingBox!).applyMatrix4(mat);
-      this.world.add(tmpBox.min.x, tmpBox.min.y, tmpBox.min.z, tmpBox.max.x, tmpBox.max.y, tmpBox.max.z);
+      this.addOrientedCollider(geo.boundingBox!, mat, 0);
     }
     return mesh;
+  }
+
+  /**
+   * Register collision for a local-space box under an arbitrary transform.
+   * Axis-aligned transforms give one AABB; rotated ones are split into a grid of
+   * small cells so the union hugs the real (oriented) shape instead of leaving
+   * invisible walls around diagonal props.
+   */
+  private addOrientedCollider(local: THREE.Box3, m: THREE.Matrix4, pad: number) {
+    const e = m.elements;
+    const sx = Math.hypot(e[0], e[1], e[2]) || 1;
+    const sy = Math.hypot(e[4], e[5], e[6]) || 1;
+    const sz = Math.hypot(e[8], e[9], e[10]) || 1;
+    // each normalized column must point along a single axis
+    const aligned = [[e[0] / sx, e[1] / sx, e[2] / sx], [e[4] / sy, e[5] / sy, e[6] / sy], [e[8] / sz, e[9] / sz, e[10] / sz]]
+      .every((c) => c.filter((v) => Math.abs(v) > 0.02).length === 1);
+    if (aligned) {
+      tmpBox.copy(local).applyMatrix4(m);
+      this.world.add(tmpBox.min.x - pad, tmpBox.min.y, tmpBox.min.z - pad, tmpBox.max.x + pad, tmpBox.max.y, tmpBox.max.z + pad);
+      return;
+    }
+    const size = local.getSize(new THREE.Vector3());
+    const cell = Math.max(0.5, Math.min(size.x, size.y, size.z) / 1.5);
+    const nx = Math.min(8, Math.max(1, Math.round(size.x / cell)));
+    const ny = Math.min(4, Math.max(1, Math.round(size.y / cell)));
+    const nz = Math.min(8, Math.max(1, Math.round(size.z / cell)));
+    const c = new THREE.Box3();
+    for (let i = 0; i < nx; i++)
+      for (let j = 0; j < ny; j++)
+        for (let k = 0; k < nz; k++) {
+          c.min.set(local.min.x + (size.x * i) / nx, local.min.y + (size.y * j) / ny, local.min.z + (size.z * k) / nz);
+          c.max.set(local.min.x + (size.x * (i + 1)) / nx, local.min.y + (size.y * (j + 1)) / ny, local.min.z + (size.z * (k + 1)) / nz);
+          tmpBox.copy(c).applyMatrix4(m);
+          this.world.add(tmpBox.min.x - pad, tmpBox.min.y, tmpBox.min.z - pad, tmpBox.max.x + pad, tmpBox.max.y, tmpBox.max.z + pad);
+        }
   }
 
   /** Merge everything into a few meshes. */

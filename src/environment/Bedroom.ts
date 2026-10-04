@@ -21,6 +21,9 @@ export interface BedroomInfo {
   trainPath: (t: number, out: THREE.Vector3) => THREE.Vector3;
   motes: THREE.Points;
   dynamicSpots: { pos: THREE.Vector3; kind: string; color: number }[];
+  pickupSpots: { pos: THREE.Vector3; kind: 'health' | 'ammo' | 'frag' | 'flash' | 'minigun'; respawn: number }[];
+  /** spread-out spawn points for players in multiplayer */
+  playerSpawns: THREE.Vector3[];
 }
 
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x * CM, y * CM, z * CM);
@@ -225,19 +228,17 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
     });
     // support stack of books under the ramp middle
     const sx = -5;
-    const sy = ((sx - bot.x) / dx) * dy;
+    // keep the stack fully under the plank (its top follows the slope's lowest point over the stack)
+    const sy = ((sx - 5 - bot.x) / dx) * dy - 1.4;
     [0x6a4fd8, 0xff6b5a, 0x3fc1a0].forEach((c, i) => {
       const h = sy / 3;
-      b.box('painted', c, sx - 9 + i, sx + 9 - i, i * h, (i + 1) * h - 0.3, -16 + i, 0 - i, 0.8, { collide: true });
+      b.box('painted', c, sx - 5 + i * 0.3, sx + 5 - i * 0.3, i * h, (i + 1) * h - 0.3, -16 + i, 0 - i, 0.8, { collide: true });
     });
-    // stair-step colliders following the slope (world units)
-    const steps = 70;
-    for (let i = 0; i < steps; i++) {
-      const t0 = i / steps, t1 = (i + 1) / steps;
-      const x0 = bot.x + dx * t0, x1 = bot.x + dx * t1;
-      const yTop = bot.y + dy * t1;
-      world.add(x0 * CM, Math.max(0, yTop - 1.4) * CM, (top.z - 7) * CM, x1 * CM, yTop * CM, (top.z + 7) * CM);
-    }
+    // smooth sloped walking surface (world units)
+    world.addRamp({
+      minX: bot.x * CM, maxX: top.x * CM, minZ: (top.z - 7) * CM, maxZ: (top.z + 7) * CM,
+      axis: 'x', u0: bot.x * CM, u1: top.x * CM, h0: bot.y * CM, h1: top.y * CM, thick: 1.2 * CM,
+    });
   }
 
   // ------------------------------------------------------------------ bookshelf (left wall)
@@ -478,7 +479,7 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
     b.part(new THREE.CylinderGeometry(7, 7, 18, 12, 1, false, 0, Math.PI), 'paper', 0xfffcf2, [-6.5, 0.6, 0], [Math.PI / 2, 0, -Math.PI / 2], { ao: 0.1 });
     b.part(new THREE.CylinderGeometry(7, 7, 18, 12, 1, false, 0, Math.PI), 'paper', 0xfffcf2, [6.5, 0.6, 0], [Math.PI / 2, 0, -Math.PI / 2], { ao: 0.1 });
   });
-  world.add(-44 * CM, 0, -12 * CM, -16 * CM, 1.2 * CM, 12 * CM);
+  world.add(-44 * CM, 0, -12 * CM, -16 * CM, 0.9 * CM, 12 * CM);
 
   // ceiling lamp
   b.part(new THREE.SphereGeometry(28, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), 'glow', 0xfff2d6, [-10, RH, 10], [Math.PI, 0, 0], { shadow: false });
@@ -530,6 +531,22 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
     train,
     trainPath: (t, out) => trackPos(t, out).multiplyScalar(CM),
     motes,
+    pickupSpots: [
+      { pos: v(-20, 0, 40), kind: 'frag', respawn: 20 },
+      { pos: v(-10, 0, -62), kind: 'frag', respawn: 20 },
+      { pos: v(60, 0, -20), kind: 'frag', respawn: 25 },
+      { pos: v(-85, 0, -75), kind: 'flash', respawn: 22 },
+      { pos: v(10, 0, 30), kind: 'flash', respawn: 22 },
+      { pos: v(-30, 0, 55), kind: 'minigun', respawn: 60 },
+      { pos: v(70, 0, 0), kind: 'health', respawn: 18 },
+      { pos: v(-45, 0, 15), kind: 'health', respawn: 18 },
+      { pos: v(-100, 0, 75), kind: 'ammo', respawn: 15 },
+      { pos: v(110, 0, 75), kind: 'ammo', respawn: 15 },
+    ],
+    playerSpawns: [
+      v(-56, 0, -96), v(110, 0, -40), v(-120, 0, 110), v(20, 0, 80), v(-95, 0, 25), v(70, 0, 60),
+      v(-30, 0, -15), v(120, 0, 110), v(50, 0, -100), v(-120, 0, -95), v(0, 0, 40), v(95, 0, 20),
+    ],
     dynamicSpots: [
       { pos: v(-25, 0, 50), kind: 'die', color: 0xffffff },
       { pos: v(70, 0, 80), kind: 'die', color: 0xff4d3d },

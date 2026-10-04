@@ -14,11 +14,27 @@ export interface RayHit {
   box: Box | null;
 }
 
-export const ROOM = { minX: -64, maxX: 64, minZ: -56, maxZ: 56, height: 84 };
+// Interior of the bedroom in world units (see Bedroom.ts: 268.8 x 240 x 240 cm at 1.6 cm/unit).
+export const ROOM = { minX: -84, maxX: 84, minZ: -75, maxZ: 75, height: 150 };
+
+/** Sloped walkable plank (e.g. the race-track ramp). Height varies linearly along one axis. */
+export interface Ramp {
+  minX: number; maxX: number; minZ: number; maxZ: number;
+  axis: 'x' | 'z';
+  u0: number; u1: number; h0: number; h1: number;
+  thick: number;
+}
+
+export function rampSurface(r: Ramp, x: number, z: number) {
+  const u = r.axis === 'x' ? x : z;
+  const t = Math.max(0, Math.min(1, (u - r.u0) / (r.u1 - r.u0)));
+  return r.h0 + (r.h1 - r.h0) * t;
+}
 
 /** Axis-aligned collision world + tiny cylinder character controller. */
 export class CollisionWorld {
   boxes: Box[] = [];
+  ramps: Ramp[] = [];
   private cell = 8;
   private hash = new Map<number, Box[]>();
 
@@ -34,6 +50,21 @@ export class CollisionWorld {
         l.push(b);
       }
     return b;
+  }
+
+  addRamp(r: Ramp) {
+    this.ramps.push(r);
+  }
+
+  /** Highest ramp surface under (x,z) that is at or below y (+tolerance), or -1. */
+  private rampSupport(x: number, z: number, r: number, maxY: number) {
+    let best = -1;
+    for (const rp of this.ramps) {
+      if (x + r * 0.5 < rp.minX || x - r * 0.5 > rp.maxX || z + r * 0.5 < rp.minZ || z - r * 0.5 > rp.maxZ) continue;
+      const s = rampSurface(rp, Math.max(rp.minX, Math.min(rp.maxX, x)), Math.max(rp.minZ, Math.min(rp.maxZ, z)));
+      if (s <= maxY && s > best) best = s;
+    }
+    return best;
   }
 
   addFromObject(o: THREE.Object3D, pad = 0) {
@@ -72,7 +103,7 @@ export class CollisionWorld {
    * Move a vertical cylinder (feet at pos) by vel*dt, resolving collisions.
    * Returns true if grounded after the move.
    */
-  moveCylinder(pos: THREE.Vector3, vel: THREE.Vector3, dt: number, radius: number, height: number, step = 0.6): boolean {
+  moveCylinder(pos: THREE.Vector3, vel: THREE.Vector3, dt: number, radius: number, height: number, step = 0.6, snap = 0.02): boolean {
     let grounded = false;
     const prevY = pos.y;
 
@@ -83,43 +114,27 @@ export class CollisionWorld {
     for (let iter = 0; iter < 2; iter++) {
       for (const b of cand) {
         if (b.maxY <= pos.y + step || b.minY >= pos.y + height) continue;
-        const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
-        const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
-        let dx = pos.x - cx, dz = pos.z - cz;
-        const d2 = dx * dx + dz * dz;
-        if (d2 >= radius * radius) continue;
-        if (d2 > 1e-8) {
-          const d = Math.sqrt(d2);
-          const push = radius - d;
-          dx /= d; dz /= d;
-          pos.x += dx * push;
-          pos.z += dz * push;
-          const vn = vel.x * dx + vel.z * dz;
-          if (vn < 0) { vel.x -= vn * dx; vel.z -= vn * dz; }
-        } else {
-          // centre inside: push out along smallest axis
-          const pl = pos.x - b.minX + radius, pr = b.maxX - pos.x + radius;
-          const pb = pos.z - b.minZ + radius, pf = b.maxZ - pos.z + radius;
-          const m = Math.min(pl, pr, pb, pf);
-          if (m === pl) { pos.x -= pl; vel.x = Math.min(vel.x, 0); }
-          else if (m === pr) { pos.x += pr; vel.x = Math.max(vel.x, 0); }
-          else if (m === pb) { pos.z -= pb; vel.z = Math.min(vel.z, 0); }
-          else { pos.z += pf; vel.z = Math.max(vel.z, 0); }
-        }
+        this.pushOut(pos, vel, radius, b.minX, b.maxX, b.minZ, b.maxZ);
+      }
+      // ramps block from the sides / underneath where the surface is too high to step onto
+      for (const rp of this.ramps) {
+        if (pos.x + radius <= rp.minX || pos.x - radius >= rp.maxX || pos.z + radius <= rp.minZ || pos.z - radius >= rp.maxZ) continue;
+        const s = rampSurface(rp, Math.max(rp.minX, Math.min(rp.maxX, pos.x)), Math.max(rp.minZ, Math.min(rp.maxZ, pos.z)));
+        if (s <= pos.y + step || s - rp.thick >= pos.y + height) continue;
+        this.pushOut(pos, vel, radius, rp.minX, rp.maxX, rp.minZ, rp.maxZ);
       }
     }
-    // room walls
     pos.x = Math.max(ROOM.minX + radius, Math.min(ROOM.maxX - radius, pos.x));
     pos.z = Math.max(ROOM.minZ + radius, Math.min(ROOM.maxZ - radius, pos.z));
 
     // ---- vertical ----
     pos.y += vel.y * dt;
-    const r2 = radius * 0.85;
+    const r2 = radius * 0.97;
     let support = 0;
+    const reach = Math.max(prevY, pos.y) + step + 0.001;
     for (const b of cand) {
       if (pos.x + r2 <= b.minX || pos.x - r2 >= b.maxX || pos.z + r2 <= b.minZ || pos.z - r2 >= b.maxZ) continue;
-      // landing / stepping onto
-      if (b.maxY <= prevY + step + 0.001 && pos.y <= b.maxY + 0.02 && vel.y <= 0.01) {
+      if (b.maxY <= reach && vel.y <= 0.01) {
         if (b.maxY > support) support = b.maxY;
         continue;
       }
@@ -129,12 +144,14 @@ export class CollisionWorld {
         vel.y = 0;
       }
     }
-    if (pos.y <= support + 0.02 && vel.y <= 0.01) {
-      if (support > 0 || pos.y <= 0.02) {
-        pos.y = Math.max(support, 0);
-        vel.y = 0;
-        grounded = true;
-      }
+    if (vel.y <= 0.01) {
+      const rs = this.rampSupport(pos.x, pos.z, radius, reach);
+      if (rs > support) support = rs;
+    }
+    if (vel.y <= 0.01 && pos.y <= support + snap) {
+      pos.y = support;
+      vel.y = 0;
+      grounded = true;
     }
     if (pos.y <= 0) {
       pos.y = 0;
@@ -146,6 +163,31 @@ export class CollisionWorld {
       vel.y = Math.min(vel.y, 0);
     }
     return grounded;
+  }
+
+  private pushOut(pos: THREE.Vector3, vel: THREE.Vector3, radius: number, minX: number, maxX: number, minZ: number, maxZ: number) {
+    const cx = Math.max(minX, Math.min(pos.x, maxX));
+    const cz = Math.max(minZ, Math.min(pos.z, maxZ));
+    let dx = pos.x - cx, dz = pos.z - cz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= radius * radius) return;
+    if (d2 > 1e-8) {
+      const d = Math.sqrt(d2);
+      const push = radius - d;
+      dx /= d; dz /= d;
+      pos.x += dx * push;
+      pos.z += dz * push;
+      const vn = vel.x * dx + vel.z * dz;
+      if (vn < 0) { vel.x -= vn * dx; vel.z -= vn * dz; }
+    } else {
+      const pl = pos.x - minX + radius, pr = maxX - pos.x + radius;
+      const pb = pos.z - minZ + radius, pf = maxZ - pos.z + radius;
+      const m = Math.min(pl, pr, pb, pf);
+      if (m === pl) { pos.x -= pl; vel.x = Math.min(vel.x, 0); }
+      else if (m === pr) { pos.x += pr; vel.x = Math.max(vel.x, 0); }
+      else if (m === pb) { pos.z -= pb; vel.z = Math.min(vel.z, 0); }
+      else { pos.z += pf; vel.z = Math.max(vel.z, 0); }
+    }
   }
 
   private tmpN = new THREE.Vector3();
@@ -179,6 +221,18 @@ export class CollisionWorld {
       if (axis === 0) n.x = -Math.sign(d.x);
       else if (axis === 1) n.y = -Math.sign(d.y);
       else n.z = -Math.sign(d.z);
+    }
+    // ramps (thin sloped planks)
+    for (const rp of this.ramps) {
+      const t = rayRamp(rp, o, d, best);
+      if (t >= 0) {
+        best = t;
+        bestBox = null;
+        found = true;
+        const slope = (rp.h1 - rp.h0) / (rp.u1 - rp.u0);
+        if (rp.axis === 'x') n.set(-slope, 1, 0).normalize(); else n.set(0, 1, -slope).normalize();
+        if (d.dot(n) > 0) n.negate();
+      }
     }
     // floor / ceiling / walls
     const planes: [number, number, number][] = [];
@@ -226,7 +280,7 @@ export class CollisionWorld {
 
   /** Highest surface under (x,z) below height y. */
   groundAt(x: number, z: number, y: number) {
-    let g = 0;
+    let g = Math.max(0, this.rampSupport(x, z, 0, y + 0.01));
     for (const b of this.query(x, z, x, z)) {
       if (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ && b.maxY <= y + 0.01 && b.maxY > g) g = b.maxY;
     }
@@ -263,6 +317,15 @@ export class NavGrid {
             this.blocked[z * this.w + x] = 1;
         }
     }
+    for (const rp of world.ramps) {
+      for (let x = 0; x < this.w; x++)
+        for (let z = 0; z < this.h; z++) {
+          const cx = ROOM.minX + (x + 0.5) * this.cs, cz = ROOM.minZ + (z + 0.5) * this.cs;
+          if (cx < rp.minX - inflate || cx > rp.maxX + inflate || cz < rp.minZ - inflate || cz > rp.maxZ + inflate) continue;
+          const s = rampSurface(rp, Math.max(rp.minX, Math.min(rp.maxX, cx)), Math.max(rp.minZ, Math.min(rp.maxZ, cz)));
+          if (s > 0.7 && s - rp.thick < clearance) this.blocked[z * this.w + x] = 1;
+        }
+    }
     // outer ring
     for (let x = 0; x < this.w; x++) { this.blocked[x] = 1; this.blocked[(this.h - 1) * this.w + x] = 1; }
     for (let z = 0; z < this.h; z++) { this.blocked[z * this.w] = 1; this.blocked[z * this.w + this.w - 1] = 1; }
@@ -279,23 +342,26 @@ export class NavGrid {
     return out.set(ROOM.minX + (x + 0.5) * this.cs, 0, ROOM.minZ + (z + 0.5) * this.cs);
   }
 
-  /** BFS from target position. */
-  update(tx: number, tz: number) {
+  /** BFS from one or more target positions (all co-op players). */
+  update(tx: number, tz: number, extra: { x: number; z: number }[] = []) {
     const { w, h, blocked, dist, queue } = this;
     dist.fill(-1);
     let head = 0, tail = 0;
-    const tc = this.cellOf(tx, tz);
+    for (const t of [{ x: tx, z: tz }, ...extra]) {
+    const tc = this.cellOf(t.x, t.z);
     const tcx = tc % w, tcz = (tc / w) | 0;
     // seed: target cell or nearest free cells around it
-    for (let r = 0; r < 8 && tail === 0; r++) {
+    const start = tail;
+    for (let r = 0; r < 8 && tail === start; r++) {
       for (let dz = -r; dz <= r; dz++)
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
           const x = tcx + dx, z = tcz + dz;
           if (x < 0 || z < 0 || x >= w || z >= h) continue;
           const i = z * w + x;
-          if (!blocked[i]) { dist[i] = 0; queue[tail++] = i; }
+          if (!blocked[i] && dist[i] < 0) { dist[i] = 0; queue[tail++] = i; }
         }
+    }
     }
     while (head < tail) {
       const i = queue[head++];
@@ -340,4 +406,19 @@ export class NavGrid {
   distAt(x: number, z: number) {
     return this.dist[this.cellOf(x, z)];
   }
+}
+
+/** Ray vs ramp plank top surface within its footprint. Returns t or -1. */
+function rayRamp(r: Ramp, o: THREE.Vector3, d: THREE.Vector3, maxT: number) {
+  // surface: y = h0 + slope*(u-u0)  ->  f(t) = oy + dy t - h0 - slope*(ou + du t - u0) = 0
+  const slope = (r.h1 - r.h0) / (r.u1 - r.u0);
+  const ou = r.axis === 'x' ? o.x : o.z;
+  const du = r.axis === 'x' ? d.x : d.z;
+  const denom = d.y - slope * du;
+  if (Math.abs(denom) < 1e-6) return -1;
+  const t = (r.h0 + slope * (ou - r.u0) - o.y) / denom;
+  if (t < 0 || t > maxT) return -1;
+  const x = o.x + d.x * t, z = o.z + d.z * t;
+  if (x < r.minX || x > r.maxX || z < r.minZ || z > r.maxZ) return -1;
+  return t;
 }
