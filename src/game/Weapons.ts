@@ -574,10 +574,11 @@ export class WeaponSystem {
 
   private buildRocket(): Viewmodel {
     const root = new THREE.Group();
-    const teal = this.mats.plastic(0x2fb3b3, 0.3);
+    const DS = { side: THREE.DoubleSide };
+    const teal = this.mats.plastic(0x2fb3b3, 0.3, DS);
     const white = this.mats.plastic(0xf6f3ec, 0.35);
-    const yellow = this.mats.plastic(0xffcf33, 0.3);
-    const dark = this.mats.plastic(0x2a2d36, 0.55);
+    const yellow = this.mats.plastic(0xffcf33, 0.3, DS);
+    const dark = this.mats.plastic(0x2a2d36, 0.55, DS);
     const foam = this.mats.plastic(0xff8a1f, 0.85);
     const w = new THREE.Group();
     root.add(w);

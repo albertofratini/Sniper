@@ -127,7 +127,7 @@ export class RemoteAvatar implements Target {
   }
 
   private mat(color: number) {
-    const m = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0 });
+    const m = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0, side: THREE.DoubleSide });
     this.mats.push(m);
     return m;
   }

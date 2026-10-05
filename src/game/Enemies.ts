@@ -101,6 +101,13 @@ export abstract class Enemy {
   /** pieces that pop off on death */
   protected detach: THREE.Object3D[] = [];
   knockResist = 1;
+  /** how high a ledge this enemy can crawl up in one go */
+  get climb() {
+    return this.radius > 2 ? 1.0 : this.radius > 0.9 ? 2.0 : 3.3;
+  }
+  /** smoothed visual height so climbing looks like crawling, not teleporting */
+  private visY = 0;
+  private visInit = false;
   protected moveWanted = false;
   protected stuckCount = 0;
   /** set after repeatedly failing to move: the game teleports it to a valid spot */
@@ -130,6 +137,8 @@ export abstract class Enemy {
   /** Per-instance material so hit flashes don't affect other enemies. */
   protected mat(color: number, rough = 0.35, metal = 0, emissive = 0, ei = 0) {
     const m = new THREE.MeshStandardMaterial({
+      // double-sided: open shapes (helmets, jaws, crowns) must never look see-through
+      side: THREE.DoubleSide,
       color, roughness: rough, metalness: metal, map: this.mats.plasticMap,
       roughnessMap: rough < 0.6 ? this.mats.plasticRough : null,
       emissive, emissiveIntensity: ei,
@@ -260,7 +269,7 @@ export abstract class Enemy {
     const direct = Math.min(directRange, this.radius > 0.9 ? 6 : 5);
     if ((this.hasLos && dist < direct && !playerHigh) || dist < 2) {
       this.moveDir.set(p.x - this.pos.x, 0, p.z - this.pos.z).normalize();
-    } else if (!nav.steer(this.pos.x, this.pos.z, this.moveDir)) {
+    } else if (!nav.steer(this.pos.x, this.pos.z, this.moveDir, this.pos.y)) {
       this.moveDir.set(p.x - this.pos.x, 0, p.z - this.pos.z).normalize();
     }
     // unstick: nudge first, then ask the game to move it somewhere sensible
@@ -302,7 +311,8 @@ export abstract class Enemy {
       this.vel.x *= 1 - Math.min(1, dt * 3);
       this.vel.z *= 1 - Math.min(1, dt * 3);
     }
-    this.grounded = ctx.world.moveCylinder(this.pos, this.vel, dt, this.radius, this.height, 0.6, this.grounded ? 0.35 : 0.02);
+    // enemies crawl over low objects (matching what their flow field lets them climb)
+    this.grounded = ctx.world.moveCylinder(this.pos, this.vel, dt, this.radius, this.height, this.climb, this.grounded ? 0.45 : 0.02);
   }
 
   update(dt: number, ctx: EnemyCtx) {
@@ -340,7 +350,12 @@ export abstract class Enemy {
       s *= Math.min(1, t * 2.5);
     }
     this.group.scale.setScalar(s * this.scaleBase);
-    this.group.position.copy(this.pos);
+    if (!this.visInit) { this.visY = this.pos.y; this.visInit = true; }
+    if (this.grounded && this.pos.y > this.visY) this.visY += (this.pos.y - this.visY) * Math.min(1, dt * 9);
+    else this.visY = this.pos.y;
+    this.group.position.set(this.pos.x, this.visY, this.pos.z);
+    // tilt forward a little while hauling itself up
+    if (this.pos.y - this.visY > 0.3) this.body.rotation.x = Math.max(this.body.rotation.x, 0.35);
     this.group.rotation.y = this.yaw;
 
     // flash

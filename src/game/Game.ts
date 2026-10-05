@@ -115,11 +115,12 @@ export class Game {
     this.scene.add(this.room.group);
     this.scene.add(this.room.train);
     this.setupLights();
-    this.nav = new NavGrid(this.world);
-    this.navLarge = new NavGrid(this.world, 3.8, 1.5);
-    this.navHuge = new NavGrid(this.world, 10.5, 3.0);
+    this.world.mergeStacks();
+    this.nav = new NavGrid(this.world, 2.4, 0.7, 3.3);
+    this.navLarge = new NavGrid(this.world, 3.8, 1.5, 2.0);
+    this.navHuge = new NavGrid(this.world, 10.5, 3.0, 1.0);
     // make sure no spawn or pickup point sits inside furniture
-    const fix = (p: THREE.Vector3) => p.copy(this.freeSpot(p));
+    const fix = (p: THREE.Vector3) => (p.y > 0.5 ? p : p.copy(this.freeSpot(p)));
     this.room.playerSpawns.forEach(fix);
     this.room.spawnPoints.forEach(fix);
     this.room.pickupSpots.forEach((sp) => fix(sp.pos));
@@ -309,8 +310,9 @@ export class Game {
     s.camera.bottom = -105;
     s.camera.near = 120;
     s.camera.far = 470;
-    s.bias = -0.0004;
-    s.normalBias = 0.06;
+    // enough bias to keep sloped surfaces (the ramp, the bridge) free of shadow acne stripes
+    s.bias = -0.0006;
+    s.normalBias = this.lowEnd ? 0.32 : 0.16;
     s.radius = 3;
     this.scene.add(sun, sun.target);
     // phones: one hemisphere fill instead of extra directional lights (cheaper per pixel)
@@ -1231,10 +1233,10 @@ export class Game {
     this.navTimer -= dt;
     if (this.navTimer <= 0) {
       this.navTimer = 0.3;
-      const extra = this.targets().slice(1).filter((t) => t.alive).map((t) => ({ x: t.pos.x, z: t.pos.z }));
-      this.nav.update(pl.pos.x, pl.pos.z, extra);
-      this.navLarge.update(pl.pos.x, pl.pos.z, extra);
-      if (this.boss) this.navHuge.update(pl.pos.x, pl.pos.z, extra);
+      const extra = this.targets().slice(1).filter((t) => t.alive).map((t) => ({ x: t.pos.x, z: t.pos.z, y: t.pos.y }));
+      this.nav.update(pl.pos.x, pl.pos.z, extra, pl.pos.y);
+      this.navLarge.update(pl.pos.x, pl.pos.z, extra, pl.pos.y);
+      if (this.boss) this.navHuge.update(pl.pos.x, pl.pos.z, extra, pl.pos.y);
     }
     for (let i = 0; i < this.spawnCooldown.length; i++) this.spawnCooldown[i] -= dt;
 

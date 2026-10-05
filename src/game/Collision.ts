@@ -53,6 +53,42 @@ export class CollisionWorld {
     return b;
   }
 
+  /**
+   * Merge colliders stacked exactly on top of each other (block towers, castle
+   * walls) into single columns, so nothing mistakes a tall stack for a low step.
+   */
+  mergeStacks() {
+    const eps = 0.06;
+    const list = this.boxes.slice();
+    let merged = true;
+    while (merged) {
+      merged = false;
+      for (let i = 0; i < list.length && !merged; i++) {
+        const a = list[i];
+        if (a.wall) continue;
+        for (let j = 0; j < list.length; j++) {
+          if (i === j) continue;
+          const b = list[j];
+          if (b.wall) continue;
+          if (Math.abs(a.minX - b.minX) > eps || Math.abs(a.maxX - b.maxX) > eps || Math.abs(a.minZ - b.minZ) > eps || Math.abs(a.maxZ - b.maxZ) > eps) continue;
+          if (b.minY > a.maxY + eps || a.minY > b.maxY + eps) continue;
+          a.minY = Math.min(a.minY, b.minY);
+          a.maxY = Math.max(a.maxY, b.maxY);
+          list.splice(j, 1);
+          merged = true;
+          break;
+        }
+      }
+    }
+    const old = list;
+    this.boxes = [];
+    this.hash.clear();
+    for (const b of old) {
+      const nb = this.add(b.minX, b.minY, b.minZ, b.maxX, b.maxY, b.maxZ);
+      if (b.wall) nb.wall = true;
+    }
+  }
+
   addRamp(r: Ramp) {
     this.ramps.push(r);
   }
@@ -122,7 +158,11 @@ export class CollisionWorld {
     pos.z += (vel.z * dt) / steps;
     for (let iter = 0; iter < (radius > 1 ? 4 : 2); iter++) {
       for (const b of cand) {
-        if (b.maxY <= pos.y + (b.wall ? 0.02 : step) || b.minY >= pos.y + height) continue;
+        if (b.minY >= pos.y + height) continue;
+        if (b.maxY <= pos.y + (b.wall ? 0.02 : step)) {
+          // a ledge only counts as a step if its top is clear (nothing stacked on it in our way)
+          if (b.maxY <= pos.y + 0.6 || !this.ledgeCovered(b, pos, radius, height, cand)) continue;
+        }
         this.pushOut(pos, vel, radius, b.minX, b.maxX, b.minZ, b.maxZ);
       }
       // ramps block from the sides / underneath where the surface is too high to step onto
@@ -130,8 +170,9 @@ export class CollisionWorld {
         if (pos.x + radius <= rp.minX || pos.x - radius >= rp.maxX || pos.z + radius <= rp.minZ || pos.z - radius >= rp.maxZ) continue;
         const s = rampSurface(rp, Math.max(rp.minX, Math.min(rp.maxX, pos.x)), Math.max(rp.minZ, Math.min(rp.maxZ, pos.z)));
         if (s <= pos.y + step || s - rp.thick >= pos.y + height) continue;
-        // inside the footprint the wedge lifts you (vertical pass); it only blocks from outside
-        if (pos.x > rp.minX && pos.x < rp.maxX && pos.z > rp.minZ && pos.z < rp.maxZ) continue;
+        // inside the footprint a ramp lifts you onto it (vertical pass) unless you're well underneath a plank
+        const inside = pos.x > rp.minX && pos.x < rp.maxX && pos.z > rp.minZ && pos.z < rp.maxZ;
+        if (inside && pos.y >= s - rp.thick - 0.4) continue;
         this.pushOut(pos, vel, radius, rp.minX, rp.maxX, rp.minZ, rp.maxZ);
       }
     }
@@ -171,11 +212,11 @@ export class CollisionWorld {
       if (vel.y < 0) vel.y = 0;
       grounded = true;
     }
-    // the ramp is a solid wedge: anything whose centre is over it can't be below its surface
+    // nothing can sit inside a ramp (wedge) or plank (bridge): lift onto its surface
     for (const rp of this.ramps) {
       if (pos.x <= rp.minX || pos.x >= rp.maxX || pos.z <= rp.minZ || pos.z >= rp.maxZ) continue;
       const s = rampSurface(rp, pos.x, pos.z);
-      if (pos.y < s) {
+      if (pos.y < s && pos.y >= s - rp.thick - 0.4) {
         pos.y = s;
         if (vel.y < 0) vel.y = 0;
         grounded = true;
@@ -185,7 +226,8 @@ export class CollisionWorld {
     if (grounded && pos.y > prevY + 0.001) {
       for (const b of cand) {
         if (pos.x + r2 <= b.minX || pos.x - r2 >= b.maxX || pos.z + r2 <= b.minZ || pos.z - r2 >= b.maxZ) continue;
-        if (b.minY < pos.y + height - 0.01 && b.maxY > pos.y + height - 0.01 && b.minY > pos.y + 0.01) {
+        // anything (other than what we stand on) intersecting the body after the step-up
+        if (b.minY < pos.y + height - 0.01 && b.maxY > pos.y + 0.05) {
           pos.set(prevX, prevY, prevZ);
           vel.x = 0;
           vel.z = 0;
@@ -198,6 +240,16 @@ export class CollisionWorld {
       vel.y = Math.min(vel.y, 0);
     }
     return grounded;
+  }
+
+  private ledgeCovered(b: Box, pos: THREE.Vector3, radius: number, height: number, cand: Box[]) {
+    for (const c of cand) {
+      if (c === b || c.maxY <= b.maxY + 0.05 || c.minY >= b.maxY + height) continue;
+      if (c.maxX <= b.minX || c.minX >= b.maxX || c.maxZ <= b.minZ || c.minZ >= b.maxZ) continue;
+      const cx = Math.max(c.minX, Math.min(pos.x, c.maxX)), cz = Math.max(c.minZ, Math.min(pos.z, c.maxZ));
+      if (Math.hypot(pos.x - cx, pos.z - cz) < radius + 0.6) return true;
+    }
+    return false;
   }
 
   private pushOut(pos: THREE.Vector3, vel: THREE.Vector3, radius: number, minX: number, maxX: number, minZ: number, maxZ: number) {
@@ -323,47 +375,84 @@ export class CollisionWorld {
   }
 }
 
-/** Floor-level flow field toward the player for ground enemies. */
+/**
+ * Multi-level flow field toward the players. Every grid cell can hold several
+ * standing levels (the floor, the top of a box, a ramp or bridge surface), and
+ * agents can climb up to `climb` units between neighbouring cells or drop down
+ * from ledges. Used by enemies to follow you onto ramps, stairs and furniture.
+ */
 export class NavGrid {
   readonly cs = 2;
   readonly w: number;
   readonly h: number;
-  blocked: Uint8Array;
+  /** node heights, grouped per cell: nodes of cell c are [start[c], start[c+1]) */
+  nodeH: Float32Array;
+  start: Int32Array;
   dist: Int32Array;
   private queue: Int32Array;
+  private nodeCell: Int32Array;
 
-  constructor(world: CollisionWorld, clearance = 2.4, inflate = 0.7) {
+  constructor(private world: CollisionWorld, private clearance = 2.4, private inflate = 0.7, readonly climb = 3.3, private maxDrop = 32) {
     this.w = Math.ceil((ROOM.maxX - ROOM.minX) / this.cs);
     this.h = Math.ceil((ROOM.maxZ - ROOM.minZ) / this.cs);
-    this.blocked = new Uint8Array(this.w * this.h);
-    this.dist = new Int32Array(this.w * this.h).fill(-1);
-    this.queue = new Int32Array(this.w * this.h);
-    for (const b of world.boxes) {
-      if (b.minY >= clearance || b.maxY <= 0.7) continue;
-      const x0 = Math.floor((b.minX - inflate - ROOM.minX) / this.cs);
-      const x1 = Math.floor((b.maxX + inflate - ROOM.minX) / this.cs);
-      const z0 = Math.floor((b.minZ - inflate - ROOM.minZ) / this.cs);
-      const z1 = Math.floor((b.maxZ + inflate - ROOM.minZ) / this.cs);
-      for (let x = Math.max(0, x0); x <= Math.min(this.w - 1, x1); x++)
-        for (let z = Math.max(0, z0); z <= Math.min(this.h - 1, z1); z++) {
-          // only block if the cell centre is substantially covered
-          const cx = ROOM.minX + (x + 0.5) * this.cs, cz = ROOM.minZ + (z + 0.5) * this.cs;
-          if (cx > b.minX - inflate && cx < b.maxX + inflate && cz > b.minZ - inflate && cz < b.maxZ + inflate)
-            this.blocked[z * this.w + x] = 1;
-        }
+    const levels: number[][] = [];
+    for (let cz = 0; cz < this.h; cz++)
+      for (let cx = 0; cx < this.w; cx++) levels.push(cx === 0 || cz === 0 || cx === this.w - 1 || cz === this.h - 1 ? [] : this.cellLevels(cx, cz));
+    const total = levels.reduce((n, l) => n + l.length, 0);
+    this.nodeH = new Float32Array(total);
+    this.nodeCell = new Int32Array(total);
+    this.start = new Int32Array(levels.length + 1);
+    let k = 0;
+    levels.forEach((l, c) => {
+      this.start[c] = k;
+      for (const hh of l) {
+        this.nodeH[k] = hh;
+        this.nodeCell[k] = c;
+        k++;
+      }
+    });
+    this.start[levels.length] = k;
+    this.dist = new Int32Array(total).fill(-1);
+    this.queue = new Int32Array(total);
+  }
+
+  /** Standing heights available at a cell centre for an agent of this size. */
+  private cellLevels(cx: number, cz: number): number[] {
+    const x = ROOM.minX + (cx + 0.5) * this.cs, z = ROOM.minZ + (cz + 0.5) * this.cs;
+    const inf = this.inflate;
+    const boxes = this.world.query(x - inf - 1, z - inf - 1, x + inf + 1, z + inf + 1).slice();
+    const cands = [0];
+    const keep = 0;
+    for (const b of boxes) {
+      if (b.wall || b.maxY > ROOM.height - 3) continue;
+      if (x >= b.minX + keep && x <= b.maxX - keep && z >= b.minZ + keep && z <= b.maxZ - keep) cands.push(b.maxY);
     }
-    for (const rp of world.ramps) {
-      for (let x = 0; x < this.w; x++)
-        for (let z = 0; z < this.h; z++) {
-          const cx = ROOM.minX + (x + 0.5) * this.cs, cz = ROOM.minZ + (z + 0.5) * this.cs;
-          if (cx < rp.minX - inflate || cx > rp.maxX + inflate || cz < rp.minZ - inflate || cz > rp.maxZ + inflate) continue;
-          const s = rampSurface(rp, Math.max(rp.minX, Math.min(rp.maxX, cx)), Math.max(rp.minZ, Math.min(rp.maxZ, cz)));
-          if (s > 0.7 && s - rp.thick < clearance) this.blocked[z * this.w + x] = 1;
-        }
+    for (const r of this.world.ramps) {
+      if (x >= r.minX && x <= r.maxX && z >= r.minZ + 0.3 && z <= r.maxZ - 0.3) cands.push(rampSurface(r, x, z));
     }
-    // outer ring
-    for (let x = 0; x < this.w; x++) { this.blocked[x] = 1; this.blocked[(this.h - 1) * this.w + x] = 1; }
-    for (let z = 0; z < this.h; z++) { this.blocked[z * this.w] = 1; this.blocked[z * this.w + this.w - 1] = 1; }
+    cands.sort((a, b) => a - b);
+    const out: number[] = [];
+    for (const hh of cands) {
+      if (out.length && hh - out[out.length - 1] < 0.4) continue;
+      // body space [hh, hh+clearance] must be free of solids (inflated by agent radius)
+      let blocked = false;
+      for (const b of boxes) {
+        // ledges low enough to climb are a way up, not an obstacle
+        if (b.maxY <= hh + (b.wall ? 0.35 : this.climb) || b.minY >= hh + this.clearance) continue;
+        if (x > b.minX - inf && x < b.maxX + inf && z > b.minZ - inf && z < b.maxZ + inf) { blocked = true; break; }
+      }
+      if (!blocked)
+        for (const r of this.world.ramps) {
+          if (x < r.minX - inf || x > r.maxX + inf || z < r.minZ - inf || z > r.maxZ + inf) continue;
+          const sx = Math.max(r.minX, Math.min(r.maxX, x)), sz = Math.max(r.minZ, Math.min(r.maxZ, z));
+          const surf = rampSurface(r, sx, sz);
+          const inside = x >= r.minX && x <= r.maxX && z >= r.minZ + 0.3 && z <= r.maxZ - 0.3;
+          if (inside && Math.abs(surf - hh) < 0.4) continue; // this is the ramp level itself
+          if (surf > hh + this.climb && surf - r.thick < hh + this.clearance) { blocked = true; break; }
+        }
+      if (!blocked) out.push(hh);
+    }
+    return out;
   }
 
   cellOf(x: number, z: number) {
@@ -372,65 +461,101 @@ export class NavGrid {
     return cz * this.w + cx;
   }
 
-  centre(i: number, out: THREE.Vector3) {
-    const x = i % this.w, z = (i / this.w) | 0;
+  centre(c: number, out: THREE.Vector3) {
+    const x = c % this.w, z = (c / this.w) | 0;
     return out.set(ROOM.minX + (x + 0.5) * this.cs, 0, ROOM.minZ + (z + 0.5) * this.cs);
   }
 
-  /** BFS from one or more target positions (all co-op players). */
-  update(tx: number, tz: number, extra: { x: number; z: number }[] = []) {
-    const { w, h, blocked, dist, queue } = this;
-    dist.fill(-1);
-    let head = 0, tail = 0;
-    for (const t of [{ x: tx, z: tz }, ...extra]) {
-    const tc = this.cellOf(t.x, t.z);
-    const tcx = tc % w, tcz = (tc / w) | 0;
-    // seed: target cell or nearest free cells around it
-    const start = tail;
-    for (let r = 0; r < 8 && tail === start; r++) {
+  /** Node an agent standing at (x,y,z) occupies, or -1. */
+  nodeAt(x: number, y: number, z: number, searchR = 0) {
+    for (let r = 0; r <= searchR; r++) {
+      const c0 = this.cellOf(x, z);
+      const cx0 = c0 % this.w, cz0 = (c0 / this.w) | 0;
+      let best = -1, bd = Infinity;
       for (let dz = -r; dz <= r; dz++)
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
-          const x = tcx + dx, z = tcz + dz;
-          if (x < 0 || z < 0 || x >= w || z >= h) continue;
-          const i = z * w + x;
-          if (!blocked[i] && dist[i] < 0) { dist[i] = 0; queue[tail++] = i; }
+          const cx = cx0 + dx, cz = cz0 + dz;
+          if (cx < 0 || cz < 0 || cx >= this.w || cz >= this.h) continue;
+          const c = cz * this.w + cx;
+          for (let n = this.start[c]; n < this.start[c + 1]; n++) {
+            const hh = this.nodeH[n];
+            if (hh > y + 0.9) continue;
+            const d = y - hh + Math.hypot(dx, dz) * 0.5;
+            if (d < bd) { bd = d; best = n; }
+          }
         }
+      if (best >= 0) return best;
     }
+    return -1;
+  }
+
+  private passable(from: number, to: number) {
+    const dh = this.nodeH[to] - this.nodeH[from];
+    return dh <= this.climb && -dh <= this.maxDrop;
+  }
+
+  /** Reverse BFS from the target positions (players) over walkable/climbable links. */
+  update(tx: number, tz: number, extra: { x: number; z: number; y?: number }[] = [], ty = 0) {
+    const { w, h, dist, queue } = this;
+    dist.fill(-1);
+    let head = 0, tail = 0;
+    for (const t of [{ x: tx, z: tz, y: ty }, ...extra]) {
+      const n = this.nodeAt(t.x, t.y ?? 0, t.z, 6);
+      if (n >= 0 && dist[n] < 0) { dist[n] = 0; queue[tail++] = n; }
     }
     while (head < tail) {
-      const i = queue[head++];
-      const x = i % w, z = (i / w) | 0;
-      const d = dist[i] + 1;
-      if (x > 0 && !blocked[i - 1] && dist[i - 1] < 0) { dist[i - 1] = d; queue[tail++] = i - 1; }
-      if (x < w - 1 && !blocked[i + 1] && dist[i + 1] < 0) { dist[i + 1] = d; queue[tail++] = i + 1; }
-      if (z > 0 && !blocked[i - w] && dist[i - w] < 0) { dist[i - w] = d; queue[tail++] = i - w; }
-      if (z < h - 1 && !blocked[i + w] && dist[i + w] < 0) { dist[i + w] = d; queue[tail++] = i + w; }
+      const v = queue[head++];
+      const c = this.nodeCell[v];
+      const cx = c % w, cz = (c / w) | 0;
+      const d = dist[v] + 1;
+      for (let dz = -1; dz <= 1; dz++)
+        for (let dx = -1; dx <= 1; dx++) {
+          if ((!dx && !dz) || (dx && dz)) continue;
+          const nx = cx + dx, nz = cz + dz;
+          if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue;
+          const nc = nz * w + nx;
+          for (let u = this.start[nc]; u < this.start[nc + 1]; u++) {
+            if (dist[u] >= 0 || !this.passable(u, v)) continue;
+            dist[u] = d;
+            queue[tail++] = u;
+          }
+        }
     }
   }
 
   private tv = new THREE.Vector3();
-  /** Direction (xz) an agent at (x,z) should walk. Returns false if no path info. */
-  steer(x: number, z: number, out: THREE.Vector3): boolean {
-    const { w, h, dist, blocked } = this;
-    const i = this.cellOf(x, z);
-    const cx = i % w, cz = (i / w) | 0;
-    let best = dist[i] >= 0 ? dist[i] : 1e9;
-    let bi = -1;
+  /** Direction (xz) an agent at (x,y,z) should walk. Returns false if no path info. */
+  steer(x: number, z: number, out: THREE.Vector3, y = 0): boolean {
+    const { w, h, dist } = this;
+    const me = this.nodeAt(x, y, z, 1);
+    if (me < 0) return false;
+    const c = this.nodeCell[me];
+    const cx = c % w, cz = (c / w) | 0;
+    let best = dist[me] >= 0 ? dist[me] : 1e9;
+    let bc = -1;
     for (let dz = -1; dz <= 1; dz++)
       for (let dx = -1; dx <= 1; dx++) {
         if (!dx && !dz) continue;
         const nx = cx + dx, nz = cz + dz;
         if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue;
-        const j = nz * w + nx;
-        if (dist[j] < 0) continue;
-        // no diagonal corner cutting
-        if (dx && dz && (blocked[cz * w + nx] || blocked[nz * w + cx])) continue;
-        const dd = dist[j] + (dx && dz ? 0.4 : 0);
-        if (dd < best) { best = dd; bi = j; }
+        const nc = nz * w + nx;
+        for (let u = this.start[nc]; u < this.start[nc + 1]; u++) {
+          if (dist[u] < 0 || !this.passable(me, u)) continue;
+          if (dx && dz) {
+            // no corner cutting: both side cells need a compatible level
+            if (!this.hasNear(cz * w + nx, this.nodeH[me]) || !this.hasNear(nz * w + cx, this.nodeH[me])) continue;
+          }
+          const dd = dist[u] + (dx && dz ? 0.4 : 0);
+          if (dd < best) { best = dd; bc = nc; }
+        }
       }
-    if (bi < 0) return false;
-    this.centre(bi, this.tv);
+    if (bc < 0) {
+      // standing on our own goal node: head for the cell centre
+      if (dist[me] === 0) return false;
+      return false;
+    }
+    this.centre(bc, this.tv);
     out.set(this.tv.x - x, 0, this.tv.z - z);
     const l = out.length();
     if (l < 1e-4) return false;
@@ -438,8 +563,15 @@ export class NavGrid {
     return true;
   }
 
-  distAt(x: number, z: number) {
-    return this.dist[this.cellOf(x, z)];
+  private hasNear(c: number, hh: number) {
+    for (let n = this.start[c]; n < this.start[c + 1]; n++) if (Math.abs(this.nodeH[n] - hh) <= this.climb) return true;
+    return false;
+  }
+
+  /** BFS distance of the floor-level (or y-level) node at x,z; -1 = unreachable. */
+  distAt(x: number, z: number, y = 0) {
+    const n = this.nodeAt(x, y, z, 0);
+    return n < 0 ? -1 : this.dist[n];
   }
 }
 
