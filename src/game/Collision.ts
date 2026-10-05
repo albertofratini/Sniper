@@ -437,6 +437,9 @@ export class NavGrid {
       // body space [hh, hh+clearance] must be free of solids (inflated by agent radius)
       let blocked = false;
       for (const b of boxes) {
+        // a solid right here in the body space (not just a ledge beside us): no standing level
+        // (e.g. the mattress top under the quilt)
+        if (b.minY < hh + this.clearance && b.maxY > hh + 0.05 && x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ) { blocked = true; break; }
         // ledges low enough to climb are a way up, not an obstacle
         if (b.maxY <= hh + (b.wall ? 0.35 : this.climb) || b.minY >= hh + this.clearance) continue;
         if (x > b.minX - inf && x < b.maxX + inf && z > b.minZ - inf && z < b.maxZ + inf) { blocked = true; break; }
@@ -448,6 +451,7 @@ export class NavGrid {
           const surf = rampSurface(r, sx, sz);
           const inside = x >= r.minX && x <= r.maxX && z >= r.minZ + 0.3 && z <= r.maxZ - 0.3;
           if (inside && Math.abs(surf - hh) < 0.4) continue; // this is the ramp level itself
+          if (inside && surf > hh + 0.4 && surf - r.thick < hh - 0.05) { blocked = true; break; } // inside the ramp body
           if (surf > hh + this.climb && surf - r.thick < hh + this.clearance) { blocked = true; break; }
         }
       if (!blocked) out.push(hh);

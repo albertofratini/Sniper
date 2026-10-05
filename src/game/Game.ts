@@ -6,7 +6,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Materials } from '../environment/Materials';
 import { buildBedroom, BedroomInfo, SUN_DIR } from '../environment/Bedroom';
-import { CollisionWorld, NavGrid, RayHit } from './Collision';
+import { CollisionWorld, NavGrid, RayHit, rampSurface } from './Collision';
 import { Input } from './Input';
 import { MobileControls } from './MobileControls';
 import { Player } from './Player';
@@ -216,6 +216,13 @@ export class Game {
       if (b.minY > h || b.maxY < 0.55) continue;
       const cx = Math.max(b.minX, Math.min(p.x, b.maxX)), cz = Math.max(b.minZ, Math.min(p.z, b.maxZ));
       if (Math.hypot(p.x - cx, p.z - cz) < r) return true;
+    }
+    // inside a ramp, ladder or slide that is too high to stand under
+    for (const rp of this.world.ramps) {
+      const cx = Math.max(rp.minX, Math.min(p.x, rp.maxX)), cz = Math.max(rp.minZ, Math.min(p.z, rp.maxZ));
+      if (Math.hypot(p.x - cx, p.z - cz) >= r) continue;
+      const s = rampSurface(rp, cx, cz);
+      if (s > 0.55 && s - rp.thick < h) return true;
     }
     return false;
   }

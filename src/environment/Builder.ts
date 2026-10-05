@@ -14,6 +14,8 @@ interface PartOpts {
   shadow?: boolean;
   /** floor-contact ambient occlusion strength (0..1) */
   ao?: number;
+  /** rounded-corner segments (1 = cheap bevel) */
+  seg?: number;
 }
 
 const tmpBox = new THREE.Box3();
@@ -113,7 +115,7 @@ export class Builder {
   ) {
     const w = x1 - x0, h = y1 - y0, d = z1 - z0;
     const r = Math.min(radius, w / 2.01, h / 2.01, d / 2.01);
-    const geo = r > 0.05 ? new RoundedBoxGeometry(w, h, d, 2, r) : new THREE.BoxGeometry(w, h, d);
+    const geo = r > 0.05 ? new RoundedBoxGeometry(w, h, d, opts.seg ?? 2, r) : new THREE.BoxGeometry(w, h, d);
     scaleUV(geo, Math.max(w, h, d) / 40);
     return this.part(geo, kind, color, [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], [0, 0, 0], opts);
   }
