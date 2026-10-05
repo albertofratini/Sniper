@@ -267,7 +267,8 @@ export abstract class Enemy {
     const nav = this.radius > 2 ? ctx.navHuge : this.radius > 0.9 ? ctx.navLarge : ctx.nav;
     // walk straight only when very close; otherwise follow the flow field around furniture
     const direct = Math.min(directRange, this.radius > 0.9 ? 6 : 5);
-    if ((this.hasLos && dist < direct && !playerHigh) || dist < 2) {
+    // (never beeline when the player is on another level right above or below: take the stairs)
+    if ((this.hasLos && dist < direct && !playerHigh) || (dist < 2 && Math.abs(p.y - this.pos.y) < 3)) {
       this.moveDir.set(p.x - this.pos.x, 0, p.z - this.pos.z).normalize();
     } else if (!nav.steer(this.pos.x, this.pos.z, this.moveDir, this.pos.y)) {
       this.moveDir.set(p.x - this.pos.x, 0, p.z - this.pos.z).normalize();

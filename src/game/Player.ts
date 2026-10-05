@@ -189,7 +189,8 @@ export class Player {
     const wasGrounded = this.grounded;
     const preVy = this.vel.y;
     if (!wasGrounded) this.fallStartVel = Math.min(this.fallStartVel, preVy);
-    this.grounded = this.world.moveCylinder(this.pos, this.vel, dt, this.radius, this.height, 0.6, wasGrounded ? 0.45 : 0.02);
+    // steps up (and follows the ground down) over anything up to 1 unit (1.6 cm): train track, rug, plane spines
+    this.grounded = this.world.moveCylinder(this.pos, this.vel, dt, this.radius, this.height, 1.0, wasGrounded ? 1.0 : 0.02);
     if (this.grounded && !wasGrounded) {
       const impact = Math.min(1, -this.fallStartVel / 30);
       this.landVel -= 2.5 * impact + 0.3;

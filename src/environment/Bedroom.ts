@@ -4,6 +4,7 @@ import { Materials } from './Materials';
 import * as T from './Textures';
 import { CollisionWorld } from '../game/Collision';
 import { buildUpperLevels } from './Upper';
+import { buildSkyLevels } from './Sky';
 
 // All authoring below is in centimetres. Room interior:
 // x [-134.4, 134.4], z [-120, 120], y [0, 240]  (== ROOM in world units)
@@ -105,7 +106,8 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
   // outlets
   const outlet = (x: number, z: number, rotY: number, nightLight = false) =>
     b.with([x, 30, z], [0, rotY, 0], () => {
-      b.box('glossy', 0xf6f3ec, -4.5, 4.5, -7, 7, 0, 1.2, 0.8);
+      b.box('glossy', 0xf6f3ec, -4.5, 4.5, -7, 7, 0, 1.2, 0.8, { collide: true });
+      if (nightLight) b.collider(-3.5, 3.5, -1, 10.5, 0, 6);
       for (const oy of [-3, 3]) {
         b.box('rubber', 0x2a2a2a, -1.6, -0.8, oy - 1.2, oy + 1, 1, 1.4, 0);
         b.box('rubber', 0x2a2a2a, 0.8, 1.6, oy - 1.2, oy + 1, 1, 1.4, 0);
@@ -125,11 +127,11 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
   b.box('painted', deskWhite, -134, -94, 0, 70, -118, -62, 1, { collide: true });
   for (let i = 0; i < 3; i++) {
     const y0 = 4 + i * 22;
-    b.box('painted', 0x8fc6ef, -132, -96, y0, y0 + 20, -62, -60, 1.2);
+    b.box('painted', 0x8fc6ef, -132, -96, y0, y0 + 20, -62, -60, 1.2, { collide: true });
     b.part(new THREE.SphereGeometry(2.2, 12, 8), 'glossy', 0xffcf33, [-114, y0 + 10, -58.5]);
   }
   for (const z of [-118, -65]) b.box('painted', deskWhite, -19, -14, 0, 70, z, z + 5, 1.2, { collide: true });
-  b.box('painted', deskWhite, -19, -14, 8, 12, -113, -65, 1); // foot rail (low, steppable)
+  b.box('painted', deskWhite, -19, -14, 8, 12, -113, -65, 1, { collide: true }); // foot rail (you can walk under it)
   // on desk: lamp
   b.with([-40, 74, -100], [0, 0.5, 0], () => {
     b.part(new THREE.CylinderGeometry(9, 10, 2.5, 24), 'glossy', 0x3fa9ff, [0, 1.25, 0]);
@@ -164,8 +166,8 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
   b.box('painted', 0x8a5a32, -126, -34, 170, 172, -120, -118, 0.5);
   const drawingGeo = new THREE.PlaneGeometry(32, 24);
   [0, 1].forEach((k) => {
-    const m = mats.textured('drawing' + k, () => T.drawing(k), { roughness: 0.9 });
-    b.mesh(drawingGeo, m, [-104 + k * 46, 140 + (k ? -3 : 4), -118.2], [0, 0, (k ? 1 : -1) * 0.06], { shadow: false });
+    const m = mats.textured('drawing' + k, () => T.drawing(k), { roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    b.mesh(drawingGeo, m, [-104 + k * 46, 140 + (k ? -3 : 4), -118.44], [0, 0, (k ? 1 : -1) * 0.06], { shadow: false });
   });
 
   // ------------------------------------------------------------------ chair
@@ -202,7 +204,11 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
   // headboard
   b.box('painted', bedFrame, 28, 132, 0, 82, -120, -115, 2, { collide: true });
   b.box('painted', 0xffcf33, 34, 126, 70, 76, -116, -114, 1.5);
-  for (let i = 0; i < 6; i++) b.part(new THREE.SphereGeometry(3, 12, 8), 'glossy', [0xff4d3d, 0x7bd35a, 0xffcf33][i % 3], [42 + i * 16, 62, -114.5]);
+  for (let i = 0; i < 6; i++) {
+    b.part(new THREE.SphereGeometry(3, 12, 8), 'glossy', [0xff4d3d, 0x7bd35a, 0xffcf33][i % 3], [42 + i * 16, 62, -114.5]);
+    b.collider(39.5 + i * 16, 44.5 + i * 16, 59.5, 64.5, -116, -111.6);
+  }
+  b.collider(34, 126, 70, 76, -116, -114);
   // plush on the bed
   plush(b, [100, 47, 62], [0, 2.8, 0], 0.55, 0xb98a5e);
 
@@ -214,8 +220,8 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
 
   // drawings on right wall above bed
   [2, 0, 1].forEach((k, i) => {
-    const m = mats.textured('drawing' + k, () => T.drawing(k), { roughness: 0.9 });
-    b.mesh(drawingGeo, m, [RX - 0.4, 118 + (i % 2) * 10, -70 + i * 45], [0, -Math.PI / 2, (i - 1) * 0.07], { shadow: false });
+    const m = mats.textured('drawing' + k, () => T.drawing(k), { roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    b.mesh(drawingGeo, m, [RX - 0.04, 118 + (i % 2) * 10, -70 + i * 45], [0, -Math.PI / 2, (i - 1) * 0.07], { shadow: false });
   });
 
   // ------------------------------------------------------------------ race-track ramp (bed -> floor)
@@ -236,10 +242,11 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
     }
     b.with([mid.x, mid.y, mid.z], [0, 0, ang], () => {
       // rails sit on the deck, slightly proud of the wedge sides so faces never coincide
-      b.box('glossy', 0xf27512, -len / 2, len / 2, -0.6, 5, -7.9, -6.2, 0.5, { ao: 0 });
-      b.box('glossy', 0xf27512, -len / 2, len / 2, -0.6, 5, 6.2, 7.9, 0.5, { ao: 0 });
-      b.box('glossy', 0xffcf33, -len / 2, len / 2, 4.9, 5.8, -8.1, -6.0, 0.4, { ao: 0 });
-      b.box('glossy', 0xffcf33, -len / 2, len / 2, 4.9, 5.8, 6.0, 8.1, 0.4, { ao: 0 });
+      // rails: high enough that sprinting never spills you off, low enough to hop over (jump is 4.9 cm)
+      b.box('glossy', 0xf27512, -len / 2, len / 2, -0.6, 3.1, -7.9, -6.2, 0.5, { ao: 0 });
+      b.box('glossy', 0xf27512, -len / 2, len / 2, -0.6, 3.1, 6.2, 7.9, 0.5, { ao: 0 });
+      b.box('glossy', 0xffcf33, -len / 2, len / 2, 3.0, 3.9, -8.1, -6.0, 0.4, { ao: 0 });
+      b.box('glossy', 0xffcf33, -len / 2, len / 2, 3.0, 3.9, 6.0, 8.1, 0.4, { ao: 0 });
       for (let i = -4; i <= 4; i++) b.box('painted', 0xffffff, i * 11 - 0.6, i * 11 + 0.6, 0.02, 0.2, -0.6, 0.6, 0, { ao: 0 });
     });
     // wall colliders following the slope (world units)
@@ -248,7 +255,7 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
       const xa = bot.x + (dx * i) / segs, xb = bot.x + (dx * (i + 1)) / segs;
       const yb = bot.y + (dy * (i + 1)) / segs;
       for (const [z0, z1] of [[top.z - 7.8, top.z - 6.2], [top.z + 6.2, top.z + 7.8]]) {
-        world.add(xa * CM, 0, z0 * CM, xb * CM, (yb + 7.5) * CM, z1 * CM).wall = true;
+        world.add(xa * CM, 0, z0 * CM, xb * CM, (yb + 4.4) * CM, z1 * CM).wall = true;
       }
     }
     // smooth sloped walking surface (world units)
@@ -300,7 +307,7 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
     // toys on the upper shelf and on top (cover for the galleries)
     b.with([-110, 123, 0], [0, 0, 0], () => robotFigure(b));
     b.collider(-115, -105, 123, 154, -4, 4);
-    b.with([-111, 123, -18], [0, 0, 0], () => {
+    b.with([-112.5, 123, -18], [0, 0, 0], () => {
       b.part(new THREE.SphereGeometry(7, 20, 14), 'glossy', 0xffd400, [0, 7, 0]);
       b.part(new THREE.SphereGeometry(4.6, 18, 12), 'glossy', 0xffd400, [0, 16, 2]);
       b.part(new THREE.ConeGeometry(2, 4, 12), 'glossy', 0xff8a1f, [0, 15.5, 7], [Math.PI / 2, 0, 0]);
@@ -338,11 +345,13 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
       b.box('wood', 0xd64c3f, x0, x1, 0, 3, -38, 0, 1.5, { collide: true });
       b.box('painted', 0xffcf33, x0 + 6, x1 - 6, 3, 3.5, -32, -6, 0.5);
     });
-    const starMat = mats.textured('sticker-star', () => T.stickerTex('star'), { transparent: true, roughness: 0.4, alphaTest: 0.5 });
-    b.mesh(new THREE.CircleGeometry(9, 24), starMat, [(x0 + x1) / 2, 23, z0 - 0.15], [0, Math.PI, 0], { shadow: false });
+    const starMat = mats.textured('sticker-star', () => T.stickerTex('star'), { transparent: true, roughness: 0.4, alphaTest: 0.5, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    b.mesh(new THREE.CircleGeometry(9, 24), starMat, [(x0 + x1) / 2, 23, z0 - 0.04], [0, Math.PI, 0], { shadow: false });
     // toys peeking out
     b.part(new THREE.SphereGeometry(9, 18, 14), 'glossy', 0x3fa9ff, [-55, 46, 110], [0, 0, 0], { collide: true });
-    b.part(new THREE.TorusGeometry(6, 1.6, 10, 20), 'glossy', 0xff4d3d, [-75, 47, 108], [1.2, 0, 0.3]);
+    b.part(new THREE.TorusGeometry(6, 1.6, 10, 20), 'glossy', 0xff4d3d, [-75, 46.6, 108], [Math.PI / 2, 0, 0]);
+    for (const [x0, x1, z0, z1] of [[-82.6, -67.4, 100.4, 103.6], [-82.6, -67.4, 112.4, 115.6], [-82.6, -79.4, 103.6, 112.4], [-70.6, -67.4, 103.6, 112.4]])
+      b.collider(x0, x1, 45, 48.2, z0, z1);
   }
 
   // ------------------------------------------------------------------ overturned crate (front)
@@ -363,7 +372,8 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
   {
     // stairs of stacked wooden blocks from the board game up to the crate top (30 cm)
     const stepCols = [0xe8c48a, 0xd64c3f, 0x3f7fd9, 0xf2c84b, 0x5bbf6a, 0x9b59d0];
-    const heights = [29, 24, 19, 14, 9, 4];
+    // treads at the height of a smooth ramp (crate edge 30 -> floor), so you just walk up
+    const heights = [27.35, 22.38, 17.41, 12.44, 7.47, 2.5];
     heights.forEach((hgt, k) => {
       const xa = 40.2 + k * 6, xb = xa + 6;
       let y = 0, n = 0;
@@ -373,8 +383,16 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
         y = top;
         n++;
       }
-      b.collider(xa, xb, 0, hgt, 90, 112);
     });
+    world.addRamp({ minX: 40 * CM, maxX: 76.2 * CM, minZ: 90 * CM, maxZ: 112 * CM, axis: 'x', u0: 40 * CM, u1: 76.2 * CM, h0: 30 * CM, h1: 0, thick: 1000 });
+    for (const [z0, z1] of [[88.75, 89.95], [112.05, 113.25]]) {
+      for (let i = 0; i < 6; i++) {
+        const xa = 40.2 + i * 6, xb = xa + 6;
+        const top = heights[i] + 2.6;
+        b.box('glossy', i % 2 ? 0xffcf33 : 0xff4d3d, xa + 0.05, xb - 0.05, 0, top, z0, z1, 0.4, { ao: 0.3 });
+        world.add(xa * CM, 0, z0 * CM, xb * CM, top * CM, z1 * CM).wall = true;
+      }
+    }
     // wooden ruler bridge from the crate top (x 0, 30 cm) up to the toy chest lid edge (x -40, 45 cm)
     const A = new THREE.Vector3(-40, 45, 100), B = new THREE.Vector3(0, 30, 100);
     const rl = A.distanceTo(B), ra = Math.atan2(B.y - A.y, B.x - A.x);
@@ -428,7 +446,8 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
 
   // door on front wall
   b.with([86, 0, RZ - 1], [0, 0, 0], () => {
-    b.box('painted', 0xf7f3ea, -42, 42, 0.8, 206, -2, 1, 1.5);
+    b.box('painted', 0xf7f3ea, -42, 42, 0.8, 206, -2, 1, 1.5, { collide: true });
+    b.collider(-37.5, -30.5, 96.5, 103.5, -9.5, -2);
     b.box('painted', 0xece6da, -34, 34, 110, 196, -2.6, -2, 1);
     b.box('painted', 0xece6da, -34, 34, 14, 96, -2.6, -2, 1);
     b.part(new THREE.SphereGeometry(3.4, 14, 10), 'metal', 0xd8b25a, [-34, 100, -6]);
@@ -441,7 +460,7 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
   // ------------------------------------------------------------------ rug / play mat
   {
     const rugMat = new THREE.MeshStandardMaterial({ map: T.playMat(), roughness: 0.95, envMapIntensity: 0.25 });
-    b.mesh(new THREE.BoxGeometry(130, 0.5, 110), rugMat, [-35, 0.25, 25], [0, 0, 0], { shadow: false });
+    b.mesh(new THREE.BoxGeometry(130, 0.5, 110), rugMat, [-35, 0.25, 25], [0, 0, 0], { shadow: false, collide: true });
   }
 
   // ------------------------------------------------------------------ castle of wooden blocks
@@ -519,7 +538,11 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
   ([[-10, 40, 0.4, 0xff4d3d], [-14, 44, 1.2, 0x3fa9ff], [35, 10, 2.2, 0x7bd35a], [-55, 60, 0.9, 0xffcf33], [-80, -20, 2.5, 0x9b59d0], [15, 65, -0.3, 0xff8a1f], [-45, -10, 1.9, 0xff6fa8]] as const)
     .forEach(([x, z, r, c]) => crayon(x, z, r, c));
 
-  // pencil
+  // pencil (a 1 cm step you walk over)
+  for (let i = -3; i <= 3; i++) {
+    const px = 28 + Math.cos(0.5) * i * 2.6, pz = -65 - Math.sin(0.5) * i * 2.6;
+    world.add((px - 1.3) * CM, 0, (pz - 1.3) * CM, (px + 1.3) * CM, 1 * CM, (pz + 1.3) * CM);
+  }
   b.with([28, 0.5, -65], [0, 0.5, Math.PI / 2], () => {
     b.part(new THREE.CylinderGeometry(0.5, 0.5, 17, 6), 'painted', 0xffcf33, [0, 0, 0], [0, 0, 0], { ao: 0.1 });
     b.part(new THREE.ConeGeometry(0.5, 2, 6), 'wood', 0xe8c48a, [0, 9.5, 0]);
@@ -541,16 +564,17 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, -10, -6, 1.8, 8, 0, 0, 8, 0, 0, -10, 0, 0, 8, 6, 1.8, 8, 0, 0, -10, 0, -0.1, 8, 0, 0, 8], 3));
     g.computeVertexNormals();
-    b.part(g, 'paper', 0xffffff, [0, 2, 0], [0, 0, 0], { ao: 0.1 });
-    b.part(g, 'paper', 0xf0f0f0, [0, 2, 0], [0, Math.PI, 0], { ao: 0.1 });
+    b.part(g, 'paper', 0xffffff, [0, 0.1, 0], [0, 0, 0], { ao: 0.1 });
+    b.part(g, 'paper', 0xf0f0f0, [0, 0.1, 0], [0, Math.PI, 0], { ao: 0.1 });
   });
+  world.add(-4 * CM, 0, -26 * CM, 4 * CM, 1.4 * CM, -18 * CM); // paper plane: low enough to step on
   // open book on rug
   b.with([-30, 0.5, -0], [0, 0.4, 0], () => {
     b.box('painted', 0x2fb3b3, -14, 14, 0, 0.6, -9.5, 9.5, 0.2);
     b.part(new THREE.CylinderGeometry(7, 7, 18, 12, 1, false, 0, Math.PI), 'paper', 0xfffcf2, [-6.5, 0.6, 0], [Math.PI / 2, 0, -Math.PI / 2], { ao: 0.1 });
     b.part(new THREE.CylinderGeometry(7, 7, 18, 12, 1, false, 0, Math.PI), 'paper', 0xfffcf2, [6.5, 0.6, 0], [Math.PI / 2, 0, -Math.PI / 2], { ao: 0.1 });
   });
-  world.add(-44 * CM, 0, -12 * CM, -16 * CM, 0.9 * CM, 12 * CM);
+  world.add(-44 * CM, 0, -12 * CM, -16 * CM, 1.1 * CM, 12 * CM);
 
   // ceiling lamp
   b.part(new THREE.SphereGeometry(28, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), 'glow', 0xfff2d6, [-10, RH, 10], [Math.PI, 0, 0], { shadow: false });
@@ -572,12 +596,17 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
         b.box('wood', 0xb98a52, -1.6, -0.9, 0.95, 1.05, -len / 2, len / 2, 0, { ao: 0 });
         b.box('wood', 0xb98a52, 0.9, 1.6, 0.95, 1.05, -len / 2, len / 2, 0, { ao: 0 });
       });
+      // the track is a real (low, step-over) object
+      const cx = (p.x + q.x) / 2, cz = (p.z + q.z) / 2;
+      const hx = (Math.abs(Math.cos(ang)) * 2.4 + Math.abs(Math.sin(ang)) * len * 0.5) * 0.9;
+      const hz = (Math.abs(Math.sin(ang)) * 2.4 + Math.abs(Math.cos(ang)) * len * 0.5) * 0.9;
+      world.add((cx - hx) * CM, 0, (cz - hz) * CM, (cx + hx) * CM, 1.5 * CM, (cz + hz) * CM);
     }
   }
   const train = makeTrain(mats);
 
   // ------------------------------------------------------------------ upper levels (keep, tower, bridges, galleries)
-  const upperPickups = buildUpperLevels(b, world);
+  const upperPickups = [...buildUpperLevels(b, world), ...buildSkyLevels(b, world)];
 
   // ------------------------------------------------------------------ light shafts & dust motes
   const shafts = makeShafts();
@@ -613,7 +642,7 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
       { pos: v(10, 0, 30), kind: 'flash', respawn: 22 },
       { pos: v(-75, 46, 100), kind: 'frag', respawn: 25 },
       { pos: v(20, 31, 101), kind: 'frag', respawn: 25 },
-      { pos: v(80, 48, 40), kind: 'health', respawn: 20 },
+      { pos: v(64, 48, 60), kind: 'health', respawn: 20 },
       { pos: v(70, 0, 0), kind: 'health', respawn: 18 },
       { pos: v(-45, 0, 15), kind: 'health', respawn: 18 },
       { pos: v(-100, 0, 75), kind: 'ammo', respawn: 15 },

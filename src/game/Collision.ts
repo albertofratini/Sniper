@@ -24,6 +24,13 @@ export interface Ramp {
   axis: 'x' | 'z';
   u0: number; u1: number; h0: number; h1: number;
   thick: number;
+  /** solid wedge: the body goes down to this height (instead of a constant thickness) */
+  base?: number;
+}
+
+/** Underside of a ramp's body below the surface height s. */
+export function rampBottom(r: Ramp, s: number) {
+  return r.base !== undefined ? r.base : s - r.thick;
 }
 
 export function rampSurface(r: Ramp, x: number, z: number) {
@@ -169,10 +176,10 @@ export class CollisionWorld {
       for (const rp of this.ramps) {
         if (pos.x + radius <= rp.minX || pos.x - radius >= rp.maxX || pos.z + radius <= rp.minZ || pos.z - radius >= rp.maxZ) continue;
         const s = rampSurface(rp, Math.max(rp.minX, Math.min(rp.maxX, pos.x)), Math.max(rp.minZ, Math.min(rp.maxZ, pos.z)));
-        if (s <= pos.y + step || s - rp.thick >= pos.y + height) continue;
+        if (s <= pos.y + step || rampBottom(rp, s) >= pos.y + height) continue;
         // inside the footprint a ramp lifts you onto it (vertical pass) unless you're well underneath a plank
         const inside = pos.x > rp.minX && pos.x < rp.maxX && pos.z > rp.minZ && pos.z < rp.maxZ;
-        if (inside && pos.y >= s - rp.thick - 0.4) continue;
+        if (inside && pos.y >= rampBottom(rp, s) - 0.4) continue;
         this.pushOut(pos, vel, radius, rp.minX, rp.maxX, rp.minZ, rp.maxZ);
       }
     }
@@ -216,7 +223,7 @@ export class CollisionWorld {
     for (const rp of this.ramps) {
       if (pos.x <= rp.minX || pos.x >= rp.maxX || pos.z <= rp.minZ || pos.z >= rp.maxZ) continue;
       const s = rampSurface(rp, pos.x, pos.z);
-      if (pos.y < s && pos.y >= s - rp.thick - 0.4) {
+      if (pos.y < s && pos.y >= rampBottom(rp, s) - 0.4) {
         pos.y = s;
         if (vel.y < 0) vel.y = 0;
         grounded = true;
@@ -451,8 +458,8 @@ export class NavGrid {
           const surf = rampSurface(r, sx, sz);
           const inside = x >= r.minX && x <= r.maxX && z >= r.minZ + 0.3 && z <= r.maxZ - 0.3;
           if (inside && Math.abs(surf - hh) < 0.4) continue; // this is the ramp level itself
-          if (inside && surf > hh + 0.4 && surf - r.thick < hh - 0.05) { blocked = true; break; } // inside the ramp body
-          if (surf > hh + this.climb && surf - r.thick < hh + this.clearance) { blocked = true; break; }
+          if (inside && surf > hh + 0.4 && rampBottom(r, surf) < hh - 0.05) { blocked = true; break; } // inside the ramp body
+          if (surf > hh + this.climb && rampBottom(r, surf) < hh + this.clearance) { blocked = true; break; }
         }
       if (!blocked) out.push(hh);
     }
@@ -470,12 +477,18 @@ export class NavGrid {
     return out.set(ROOM.minX + (x + 0.5) * this.cs, 0, ROOM.minZ + (z + 0.5) * this.cs);
   }
 
-  /** Node an agent standing at (x,y,z) occupies, or -1. */
+  /**
+   * Node an agent standing at (x,y,z) occupies, or -1. Prefers the level you
+   * are actually standing on: a node a little to the side at your height beats
+   * the floor far below (e.g. next to a stair rail, the floor under a bridge).
+   */
   nodeAt(x: number, y: number, z: number, searchR = 0) {
+    const c0 = this.cellOf(x, z);
+    const cx0 = c0 % this.w, cz0 = (c0 / this.w) | 0;
+    let best = -1, bd = Infinity;
     for (let r = 0; r <= searchR; r++) {
-      const c0 = this.cellOf(x, z);
-      const cx0 = c0 % this.w, cz0 = (c0 / this.w) | 0;
-      let best = -1, bd = Infinity;
+      // nothing further out can beat what we have
+      if (best >= 0 && r * 0.5 >= bd) break;
       for (let dz = -r; dz <= r; dz++)
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
@@ -489,9 +502,8 @@ export class NavGrid {
             if (d < bd) { bd = d; best = n; }
           }
         }
-      if (best >= 0) return best;
     }
-    return -1;
+    return best;
   }
 
   private passable(from: number, to: number) {

@@ -358,3 +358,17 @@ body.is-touch #btn-swap { right: calc(248px + var(--sar)); bottom: calc(222px + 
 #btn-flash { right: calc(249px + var(--sar)); bottom: calc(154px + var(--sab)); }
 #btn-crouch { right: calc(248px + var(--sar)); bottom: calc(22px + var(--sab)); }
 #weapon-slots span.hidden { display: none !important; }
+
+/* ---------- Compact thumb cluster (raised, tighter to the edge) ----------
+   Leaves a wide free strip along the bottom-right and middle-right for the
+   right thumb to drag-aim; every button keeps >= 14px clearance. */
+body.is-touch #btn-fire { width: 82px; height: 82px; right: calc(26px + var(--sar)); bottom: calc(118px + var(--sab)); font-size: 18px; }
+body.is-touch #btn-aim { width: 60px; height: 60px; right: calc(30px + var(--sar)); bottom: calc(214px + var(--sab)); font-size: 11px; }
+body.is-touch #btn-jump { width: 58px; height: 58px; right: calc(124px + var(--sar)); bottom: calc(92px + var(--sab)); font-size: 13px; }
+body.is-touch #btn-reload { width: 46px; height: 46px; right: calc(128px + var(--sar)); bottom: calc(166px + var(--sab)); font-size: 18px; }
+body.is-touch #btn-melee { width: 48px; height: 48px; right: calc(112px + var(--sar)); bottom: calc(226px + var(--sab)); font-size: 11px; }
+body.is-touch #btn-swap { width: 46px; height: 46px; right: calc(178px + var(--sar)); bottom: calc(232px + var(--sab)); font-size: 11px; }
+body.is-touch #btn-crouch { width: 46px; height: 46px; right: calc(192px + var(--sar)); bottom: calc(70px + var(--sab)); font-size: 10px; }
+body.is-touch .tbtn.nade { width: 44px; height: 44px; font-size: 18px; }
+body.is-touch #btn-frag { right: calc(192px + var(--sar)); bottom: calc(172px + var(--sab)); }
+body.is-touch #btn-flash { right: calc(244px + var(--sar)); bottom: calc(200px + var(--sab)); }

@@ -96,7 +96,7 @@ export class Effects {
       this.tracers.push({ life: 0, max: 1, a: new THREE.Vector3(), b: new THREE.Vector3(), w: 0.05, color: new THREE.Color() });
 
     const decalTex = makeDecalTex();
-    const decalMat = new THREE.MeshStandardMaterial({ map: decalTex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, roughness: 0.6 });
+    const decalMat = new THREE.MeshStandardMaterial({ map: decalTex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, roughness: 0.6 });
     this.decalMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), decalMat, this.decalCap);
     this.decalMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.decalCap * 3).fill(1), 3);
     this.initMesh(this.decalMesh, this.decalCap);
@@ -179,10 +179,11 @@ export class Effects {
   decal(p: THREE.Vector3, n: THREE.Vector3, size: number, color = 0x2a2026) {
     const i = this.decalNext;
     this.decalNext = (this.decalNext + 1) % this.decalCap;
-    dummy.position.copy(p).addScaledVector(n, 0.02);
+    // sits on the surface (tiny lift + polygon offset against z-fighting), facing along its normal
+    dummy.position.copy(p).addScaledVector(n, 0.004);
     dummy.lookAt(dummy.position.x + n.x, dummy.position.y + n.y, dummy.position.z + n.z);
     dummy.rotateZ(Math.random() * 6.28);
-    dummy.scale.setScalar(size * (0.7 + Math.random() * 0.6));
+    dummy.scale.setScalar(size);
     dummy.updateMatrix();
     this.decalMesh.setMatrixAt(i, dummy.matrix);
     tmpC.setHex(color);

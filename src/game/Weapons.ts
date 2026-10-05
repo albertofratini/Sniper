@@ -266,6 +266,20 @@ export class WeaponSystem {
     // COD-mobile style: releasing the scope button fires
     const releaseFire = input.aimRelease && this.def.sniper === true;
 
+    // never sit on an empty magazine: reload as soon as it runs dry (or after a
+    // swap back to an empty gun); with no reserve left, change to a gun that has ammo
+    if (player.alive && this.state === 'idle' && !this.infiniteAmmo && this.ammo[this.current].mag <= 0) {
+      if (this.ammo[this.current].reserve > 0) this.startReload();
+      else if (this.cooldown <= 0) {
+        for (let k = 0; k < WEAPONS.length; k++) {
+          if (k !== this.current && this.usable(k)) {
+            this.switchTo(k);
+            break;
+          }
+        }
+      }
+    }
+
     if (player.alive && this.state === 'idle') {
       if (input.melee && this.cooldown <= 0.2) {
         this.state = 'melee';
@@ -327,7 +341,8 @@ export class WeaponSystem {
       audio.rocket();
     } else {
       let spreadBase = def.spread * (1 + moving * (def.pellets > 1 ? 0.2 : 1.6) + (player.grounded ? 0 : 0.8)) * (player.crouching ? 0.6 : 1);
-      if (def.sniper) spreadBase = this.adsT > 0.85 ? 0.0012 + moving * 0.01 : def.spread * (0.6 + moving * 0.8) * (player.grounded ? 1 : 1.6);
+      // the sniper is a precision weapon: the shot goes exactly through the crosshair, scoped or not
+      if (def.sniper) spreadBase = 0;
       const right = new THREE.Vector3(1, 0, 0).applyQuaternion(player.camera.quaternion);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(player.camera.quaternion);
       for (let i = 0; i < def.pellets; i++) {
@@ -493,7 +508,7 @@ export class WeaponSystem {
   }
 
   private sticker(kind: 'star' | 'bolt' | 'smile' | 'number', size: number, pos: [number, number, number], rotY: number, parent: THREE.Object3D, label = '7') {
-    const m = this.mats.textured('vm-sticker-' + kind + label, () => T.stickerTex(kind, label), { transparent: true, alphaTest: 0.5, roughness: 0.5 });
+    const m = this.mats.textured('vm-sticker-' + kind + label, () => T.stickerTex(kind, label), { transparent: true, alphaTest: 0.5, roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
     return this.part(new THREE.CircleGeometry(size, 20), m, pos, parent, [0, rotY, 0]);
   }
 

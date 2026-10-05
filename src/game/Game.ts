@@ -6,7 +6,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Materials } from '../environment/Materials';
 import { buildBedroom, BedroomInfo, SUN_DIR } from '../environment/Bedroom';
-import { CollisionWorld, NavGrid, RayHit, rampSurface } from './Collision';
+import { CollisionWorld, NavGrid, RayHit, rampBottom, rampSurface } from './Collision';
+import { SurfaceIndex } from './Surfaces';
 import { Input } from './Input';
 import { MobileControls } from './MobileControls';
 import { Player } from './Player';
@@ -27,6 +28,7 @@ export type GameState = 'menu' | 'playing' | 'paused' | 'dying' | 'over' | 'mpov
 interface Shockwave { pos: THREE.Vector3; r: number; hit: boolean; mesh: THREE.Mesh }
 
 const tmpHit: RayHit = { dist: 0, normal: new THREE.Vector3(), point: new THREE.Vector3(), box: null };
+const tmpN = new THREE.Vector3();
 const v1 = new THREE.Vector3();
 const MAX_NADES = 4;
 
@@ -40,6 +42,7 @@ export class Game {
   readonly mats: Materials;
   readonly room: BedroomInfo;
   readonly nav: NavGrid;
+  readonly surfaces: SurfaceIndex;
   readonly navLarge: NavGrid;
   readonly navHuge: NavGrid;
   readonly player: Player;
@@ -116,6 +119,7 @@ export class Game {
     this.scene.add(this.room.train);
     this.setupLights();
     this.world.mergeStacks();
+    this.surfaces = new SurfaceIndex(this.room.group);
     this.nav = new NavGrid(this.world, 2.4, 0.7, 3.3);
     this.navLarge = new NavGrid(this.world, 3.8, 1.5, 2.0);
     this.navHuge = new NavGrid(this.world, 10.5, 3.0, 1.0);
@@ -222,7 +226,7 @@ export class Game {
       const cx = Math.max(rp.minX, Math.min(p.x, rp.maxX)), cz = Math.max(rp.minZ, Math.min(p.z, rp.maxZ));
       if (Math.hypot(p.x - cx, p.z - cz) >= r) continue;
       const s = rampSurface(rp, cx, cz);
-      if (s > 0.55 && s - rp.thick < h) return true;
+      if (s > 0.55 && rampBottom(rp, s) < h) return true;
     }
     return false;
   }
@@ -243,7 +247,7 @@ export class Game {
         // never on the train track
         if (track.some((t) => Math.hypot(t.x - x, t.z - z) < 4)) continue;
         if (this.nav.distAt(x, z) < 0) continue;
-        if (this.world.groundAt(x, z, 50) > 0.01) continue; // ramp / raised surfaces
+        if (this.world.groundAt(x, z, 50) > 0.4) continue; // ramp / raised surfaces (the rug is fine)
         // nothing overhead (desk, bed, chair seat, ramp)
         let roofed = false;
         for (const b of this.world.query(x - 1.5, z - 1.5, x + 1.5, z + 1.5)) {
@@ -791,7 +795,8 @@ export class Game {
       const wh = this.world.raycast(origin, dir, range, tmpHit);
       let maxD = wh ? wh.dist : range;
       let best: { e: Enemy; t: number; mult: number } | null = null;
-      const pad = this.input.isTouch ? 0.22 : 0.05;
+      // touch gets a slightly kinder hitbox, except on the precision sniper (same on every device)
+      const pad = this.input.isTouch && wpn !== SNIPER ? 0.22 : 0.05;
       for (const e of this.enemies) {
         const h = e.rayHit(origin, dir, maxD, pad);
         if (h && (!best || h.t < best.t)) best = { e, t: h.t, mult: h.mult };
@@ -799,7 +804,7 @@ export class Game {
       if (best) maxD = best.t;
       let bestAv: { a: RemoteAvatar; t: number; mult: number } | null = null;
       for (const a of this.hostileAvatars()) {
-        const h = a.rayHit(origin, dir, maxD, this.input.isTouch ? 0.12 : 0.03);
+        const h = a.rayHit(origin, dir, maxD, this.input.isTouch && wpn !== SNIPER ? 0.12 : 0.03);
         if (h && (!bestAv || h.t < bestAv.t)) bestAv = { a, t: h.t, mult: h.mult };
       }
       if (bestAv) {
@@ -831,9 +836,19 @@ export class Game {
         if (!best.e.dead) this.hud.hitmarker(false);
         audio.hit(head);
       } else if (wh) {
-        end = wh.point.clone();
-        this.fx.impact(end, wh.normal, 0xfff0c0);
-        if (pellet < 4) this.fx.decal(end, wh.normal, wpn === 1 ? 0.18 : 0.14);
+        // find the rendered surface near the collision hit, so marks sit on what you see
+        const st = this.surfaces.raycast(origin, dir, Math.max(0, wh.dist - 0.9), wh.dist + 0.9, tmpN);
+        if (st >= 0) {
+          end = origin.clone().addScaledVector(dir, st);
+          this.fx.impact(end, tmpN, 0xfff0c0);
+          if (pellet < 4) {
+            const size = this.surfaces.fitDecal(end, tmpN, (wpn === 1 ? 0.18 : 0.14) * (0.8 + Math.random() * 0.4));
+            if (size > 0) this.fx.decal(end, tmpN, size);
+          }
+        } else {
+          end = wh.point.clone();
+          this.fx.impact(end, wh.normal, 0xfff0c0);
+        }
         if (pellet === 0) audio.surfaceHit();
       } else end = origin.clone().addScaledVector(dir, range);
       if (pellet < 3) {
@@ -1275,7 +1290,7 @@ export class Game {
     for (const e of this.enemies) if (e.type !== 'bug') kickers.push({ pos: e.pos, vel: e.vel, r: e.radius });
     this.props.update(dt, kickers);
     this.trainCollide(dt);
-    this.pickups.update(dt, pl.pos, (k: PickupKind) => this.collect(k));
+    this.pickups.update(dt, pl.pos, pl.height, (k: PickupKind) => this.wants(k), (k: PickupKind) => this.collect(k));
     this.updateShockwaves(dt);
 
     if (this.state === 'playing' && this.simulatesEnemies && this.waves.state !== 'done') this.waves.update(dt);
@@ -1318,8 +1333,22 @@ export class Game {
     input.endFrame();
   }
 
+  /** Could the player use this pickup right now? */
+  private wants(k: PickupKind): boolean {
+    const pl = this.player;
+    if (!pl.alive) return false;
+    switch (k) {
+      case 'health': return pl.health < pl.maxHealth;
+      case 'frag': return this.nades.frag < MAX_NADES;
+      case 'flash': return this.nades.flash < MAX_NADES;
+      case 'minigun': return !this.weapons.allowed || this.weapons.allowed.includes(MINIGUN);
+      default: return true;
+    }
+  }
+
   private collect(k: PickupKind): boolean {
     const pl = this.player;
+    if (!this.wants(k)) return false;
     switch (k) {
       case 'health':
         if (pl.health >= pl.maxHealth) return false;
@@ -1361,7 +1390,7 @@ export class Game {
     hud.nades(this.nades.frag, this.nades.flash);
     hud.sniperButton(this.weapons.def.sniper === true);
     const spread = this.weapons.def.spread * 400 * (1 + pl.speed01 * (this.weapons.current === 1 ? 0.2 : 1.6)) + (this.weapons.state === 'reload' ? 6 : 0);
-    hud.crosshair(Math.min(30, this.weapons.def.sniper ? (this.weapons.adsT > 0.85 ? 0 : 26) : spread), this.onTarget);
+    hud.crosshair(Math.min(30, this.weapons.def.sniper ? 0 : spread), this.onTarget);
     this.updateWeaponHud();
 
     if (this.inMatch && this.mode !== 'coop') {

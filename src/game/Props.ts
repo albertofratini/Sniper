@@ -226,7 +226,11 @@ function pipLayout(n: number): [number, number][] {
 // ----------------------------------------------------------------------------- pickups
 
 export type PickupKind = 'health' | 'ammo' | 'frag' | 'flash' | 'minigun';
-interface Pickup { kind: PickupKind; mesh: THREE.Object3D; pos: THREE.Vector3; vel: THREE.Vector3; life: number; t: number; spot: number }
+interface Pickup {
+  kind: PickupKind; mesh: THREE.Object3D; pos: THREE.Vector3; vel: THREE.Vector3; life: number; t: number; spot: number;
+  /** 0..1 appear animation; -1 = not collected, >= 0 = seconds since collected; rest = fixed map item */
+  grow: number; gone: number; rest: boolean;
+}
 interface Spot { pos: THREE.Vector3; kind: PickupKind; respawn: number; timer: number; taken: boolean }
 
 export class Pickups {
@@ -242,7 +246,7 @@ export class Pickups {
     if (!sp) return;
     sp.taken = true;
     sp.timer = sp.respawn;
-    for (const p of this.list) if (p.spot === i) p.life = 0;
+    for (const p of this.list) if (p.spot === i && p.gone < 0) p.gone = 0;
   }
 
   constructor(private mats: Materials, private world: CollisionWorld) {
@@ -320,16 +324,32 @@ export class Pickups {
 
   spawn(kind: PickupKind, pos: THREE.Vector3, spot = -1) {
     const mesh = this.proto[kind].clone();
-    this.group.add(mesh);
+    mesh.scale.setScalar(0.001);
     const still = spot >= 0;
-    this.list.push({
-      kind, mesh, pos: pos.clone().add(new THREE.Vector3(0, 0.6, 0)),
-      vel: still ? new THREE.Vector3() : new THREE.Vector3((Math.random() - 0.5) * 4, 7, (Math.random() - 0.5) * 4),
-      life: still ? Infinity : 22, t: Math.random() * 6, spot,
-    });
+    const p: Pickup = {
+      kind, mesh, pos: pos.clone(), vel: new THREE.Vector3(), life: still ? Infinity : 22, t: Math.random() * 6, spot,
+      grow: 0, gone: -1, rest: false,
+    };
+    if (still) {
+      // map items sit at a fixed height above whatever they rest on, forever
+      p.pos.y = this.world.groundAt(pos.x, pos.z, pos.y + 0.5) + 0.6;
+      p.rest = true;
+    } else {
+      p.pos.y += 0.6;
+      p.vel.set((Math.random() - 0.5) * 4, 7, (Math.random() - 0.5) * 4);
+    }
+    mesh.position.copy(p.pos);
+    this.group.add(mesh);
+    this.list.push(p);
   }
 
-  update(dt: number, playerPos: THREE.Vector3, collect: (k: PickupKind) => boolean) {
+  private tmp = new THREE.Vector3();
+  /**
+   * Items are picked up when the player's body overlaps them (walking through,
+   * or jumping over them), exactly once. `wants` says whether the player could
+   * use an item right now (dropped ones then drift toward the player).
+   */
+  update(dt: number, playerPos: THREE.Vector3, playerHeight: number, wants: (k: PickupKind) => boolean, collect: (k: PickupKind) => boolean) {
     this.spots.forEach((sp, i) => {
       if (!sp.taken) return;
       sp.timer -= dt;
@@ -338,42 +358,70 @@ export class Pickups {
         this.spawn(sp.kind, sp.pos, i);
       }
     });
+    const chest = this.tmp.set(playerPos.x, playerPos.y + playerHeight * 0.45, playerPos.z);
     for (const p of this.list) {
-      p.life -= dt;
       p.t += dt;
-      const d = p.pos.distanceTo(new THREE.Vector3(playerPos.x, playerPos.y + 0.8, playerPos.z));
-      if (d < 4.5 && p.spot < 0) {
-        // magnet
-        const dir = new THREE.Vector3(playerPos.x, playerPos.y + 0.8, playerPos.z).sub(p.pos).normalize();
-        p.vel.lerp(dir.multiplyScalar(16), Math.min(1, dt * 6));
-      } else {
-        p.vel.y -= 25 * dt;
-        p.vel.x *= 1 - Math.min(1, dt * 2);
-        p.vel.z *= 1 - Math.min(1, dt * 2);
+      if (p.gone >= 0) {
+        // collected: quick pop up and shrink away
+        p.gone += dt;
+        const k = Math.min(1, p.gone / 0.22);
+        p.mesh.position.y += dt * 4;
+        p.mesh.scale.setScalar(1.3 * (1 + 0.35 * Math.sin(k * Math.PI)) * (1 - k));
+        if (k >= 1) p.life = 0;
+        continue;
       }
-      p.pos.addScaledVector(p.vel, dt);
-      const g = this.world.groundAt(p.pos.x, p.pos.z, p.pos.y) + 0.6;
-      if (p.pos.y < g) {
-        p.pos.y = g;
-        p.vel.y = Math.max(0, p.vel.y);
+      p.life -= dt;
+      if (!p.rest) {
+        const dx = chest.x - p.pos.x, dy = chest.y - p.pos.y, dz = chest.z - p.pos.z;
+        const d = Math.hypot(dx, dy, dz);
+        if (d < 4.5 && d > 0.01 && wants(p.kind)) {
+          // magnet toward the player, only for things they can use
+          const k = Math.min(1, dt * 6);
+          p.vel.x += ((dx / d) * 16 - p.vel.x) * k;
+          p.vel.y += ((dy / d) * 16 - p.vel.y) * k;
+          p.vel.z += ((dz / d) * 16 - p.vel.z) * k;
+        } else {
+          p.vel.y -= 25 * dt;
+          p.vel.x *= 1 - Math.min(1, dt * 2);
+          p.vel.z *= 1 - Math.min(1, dt * 2);
+        }
+        p.pos.addScaledVector(p.vel, dt);
+        const g = this.world.groundAt(p.pos.x, p.pos.z, p.pos.y) + 0.6;
+        if (p.pos.y <= g) {
+          p.pos.y = g;
+          p.vel.y = Math.max(0, p.vel.y);
+          if (Math.abs(p.vel.x) + Math.abs(p.vel.z) < 0.05 && !wants(p.kind)) p.vel.set(0, 0, 0);
+        }
       }
-      if (d < 1.3 && collect(p.kind)) {
-        p.life = 0;
+      // body overlap: horizontally inside the pickup radius, vertically between
+      // a jump below the feet and the top of the head
+      const hx = playerPos.x - p.pos.x, hz = playerPos.z - p.pos.z;
+      const over = hx * hx + hz * hz < 1.25 * 1.25 && p.pos.y > playerPos.y - 3.1 && p.pos.y < playerPos.y + playerHeight + 0.4;
+      if (over && p.grow > 0.5 && collect(p.kind)) {
+        p.gone = 0;
         if (p.spot >= 0) {
           const sp = this.spots[p.spot];
           sp.taken = true;
           sp.timer = sp.respawn;
           this.onSpotTaken(p.spot);
         }
+        continue;
       }
-      p.mesh.position.copy(p.pos);
-      p.mesh.position.y += Math.sin(p.t * 3) * 0.12;
+      // presentation only: gentle bob/spin, smooth grow-in and fade-out
+      p.grow = Math.min(1, p.grow + dt / 0.35);
+      const e = 1 - Math.pow(1 - p.grow, 3);
+      const fade = p.life < 0.4 ? Math.max(0, p.life / 0.4) : 1;
+      const pulse = p.life < 3 ? 0.92 + 0.08 * Math.sin(p.t * 10) : 1;
+      p.mesh.position.set(p.pos.x, p.pos.y + Math.sin(p.t * 3) * 0.12, p.pos.z);
       p.mesh.rotation.y += dt * 2.5;
-      const s = p.life < 3 ? (Math.sin(p.t * 20) > 0 ? 1 : 0.3) : 1;
-      p.mesh.scale.setScalar(s * 1.3);
-      if (p.life <= 0) this.group.remove(p.mesh);
+      p.mesh.scale.setScalar(1.3 * e * fade * pulse);
     }
-    this.list = this.list.filter((p) => p.life > 0);
+    let w = 0;
+    for (const p of this.list) {
+      if (p.life > 0) this.list[w++] = p;
+      else this.group.remove(p.mesh);
+    }
+    this.list.length = w;
   }
 
   clear() {

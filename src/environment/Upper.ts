@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { Builder, CM, scaleUV } from './Builder';
-import { MatKind } from './Materials';
+import { Builder, CM } from './Builder';
+import { makeKit } from './Kit';
 import { CollisionWorld } from '../game/Collision';
 
 /**
@@ -16,209 +16,13 @@ import { CollisionWorld } from '../game/Collision';
  *                upper shelf 123 · crow's nest 160
  */
 
-type Axis = 'x' | 'z';
 export type PickupKind = 'health' | 'ammo' | 'frag' | 'flash' | 'minigun';
 export interface PickupSpot { pos: THREE.Vector3; kind: PickupKind; respawn: number }
 
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x * CM, y * CM, z * CM);
 
-/** Box whose top and bottom follow functions of u (plank, wedge, rail). u1 > u0, c1 > c0. */
-function slopedGeo(axis: Axis, u0: number, u1: number, c0: number, c1: number, top: (u: number) => number, bot: (u: number) => number) {
-  const g = new THREE.BoxGeometry(1, 1, 1);
-  const p = g.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < p.count; i++) {
-    const su = (axis === 'x' ? p.getX(i) : p.getZ(i)) + 0.5;
-    const sc = (axis === 'x' ? p.getZ(i) : p.getX(i)) + 0.5;
-    const u = u0 + (u1 - u0) * su, c = c0 + (c1 - c0) * sc;
-    const y = p.getY(i) > 0 ? top(u) : bot(u);
-    if (axis === 'x') p.setXYZ(i, u, y, c);
-    else p.setXYZ(i, c, y, u);
-  }
-  g.computeVertexNormals();
-  scaleUV(g, Math.max(u1 - u0, c1 - c0) / 40);
-  return g;
-}
-
-interface RampOpts {
-  axis: Axis;
-  /** along-axis range; h0 is the height at u0, h1 at u1 */
-  u0: number; u1: number; h0: number; h1: number;
-  /** cross-axis range (walkable width) */
-  c0: number; c1: number;
-  /** solid wedge down to `base` (default: a plank of this thickness) */
-  solid?: boolean;
-  base?: number;
-  thick?: number;
-  kind?: MatKind;
-  cols: number[];
-  segs?: number;
-  ladder?: boolean;
-  /** side rails on the c0 / c1 edge */
-  rails?: [boolean, boolean];
-  railH?: number;
-  railCol?: number;
-}
-
 export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[] {
-  const add = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) =>
-    world.add(x0 * CM, y0 * CM, z0 * CM, x1 * CM, y1 * CM, z1 * CM);
-  /** collider you can't stand on (rails, parapets) */
-  const wallC = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) => {
-    add(x0, x1, y0, y1, z0, z1).wall = true;
-  };
-  /** builder box with cheap one-segment bevels (there are a lot of these up here) */
-  const box: Builder['box'] = (kind, col, x0, x1, y0, y1, z0, z1, r = 0.6, opts = {}) => b.box(kind, col, x0, x1, y0, y1, z0, z1, r, { seg: 1, ...opts });
-  const solid = (kind: MatKind, col: number, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, r = 0.4) =>
-    box(kind, col, x0, x1, y0, y1, z0, z1, r, { collide: true, ao: 0.15 });
-
-  /** Staggered toy bricks filling a thin wall volume (visual only). */
-  const bricks = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, pal: number[], seed: number) => {
-    const alongX = x1 - x0 >= z1 - z0;
-    const len = alongX ? x1 - x0 : z1 - z0;
-    const n = Math.max(1, Math.round((y1 - y0) / 3.3));
-    const ch = (y1 - y0) / n;
-    for (let row = 0; row < n; row++) {
-      const ya = y0 + row * ch, yb = ya + ch;
-      let s = 0, k = 0;
-      while (s < len - 0.01) {
-        let e = Math.min(len, s + (k === 0 && row % 2 ? 6 : 12));
-        if (len - e < 4) e = len;
-        const col = pal[(seed * 7 + row * 3 + k * 2 + ((row + k) % 3)) % pal.length];
-        if (alongX) box('glossy', col, x0 + s, x0 + e, ya, yb, z0, z1, 0.3, { ao: 0.1 });
-        else box('glossy', col, x0, x1, ya, yb, z0 + s, z0 + e, 0.3, { ao: 0.1 });
-        s = e;
-        k++;
-      }
-    }
-  };
-
-  /** Brick wall segment (visual + collider). With slits: narrow gun slots at standing eye height. */
-  const wall = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, pal: number[], seed: number, slits = false) => {
-    const alongX = x1 - x0 >= z1 - z0;
-    const len = alongX ? x1 - x0 : z1 - z0;
-    const nS = slits ? Math.floor(len / 9) : 0;
-    if (!nS) {
-      bricks(x0, x1, y0, y1, z0, z1, pal, seed);
-      add(x0, x1, y0, y1, z0, z1);
-      return;
-    }
-    const s0 = y0 + 1.6, s1 = y0 + 3.6;
-    bricks(x0, x1, y0, s0, z0, z1, pal, seed);
-    add(x0, x1, y0, s0, z0, z1);
-    bricks(x0, x1, s1, y1, z0, z1, pal, seed + 1);
-    add(x0, x1, s1, y1, z0, z1);
-    const pillar = (a: number, c: number) => {
-      if (c - a < 0.05) return;
-      if (alongX) {
-        box('glossy', 0xf4f1ea, x0 + a, x0 + c, s0, s1, z0 + 0.15, z1 - 0.15, 0.25, { ao: 0 });
-        add(x0 + a, x0 + c, s0, s1, z0, z1);
-      } else {
-        box('glossy', 0xf4f1ea, x0 + 0.15, x1 - 0.15, s0, s1, z0 + a, z0 + c, 0.25, { ao: 0 });
-        add(x0, x1, s0, s1, z0 + a, z0 + c);
-      }
-    };
-    let prev = 0;
-    for (let i = 0; i < nS; i++) {
-      const c = ((i + 0.5) * len) / nS;
-      pillar(prev, c - 1.2);
-      // dark slot back so the slit reads as an opening, not a missing brick
-      prev = c + 1.2;
-    }
-    pillar(prev, len);
-  };
-
-  /** Low crenellated wall (cover you can shoot over when standing, hide behind when crouched). */
-  const parapet = (x0: number, x1: number, z0: number, z1: number, y: number, pal: number[], gaps: [number, number][] = [], h = 2.6) => {
-    const alongX = x1 - x0 >= z1 - z0;
-    const a0 = alongX ? x0 : z0, a1 = alongX ? x1 : z1;
-    let a = a0, k = 0;
-    while (a < a1 - 0.01) {
-      const merlon = k % 2 === 0;
-      let e = Math.min(a1, a + (merlon ? 4 : 3));
-      if (a1 - e < 1.5) e = a1;
-      const g = gaps.find(([g0, g1]) => e > g0 && a < g1);
-      if (g) {
-        // clip around the opening
-        if (a < g[0]) e = g[0];
-        else { a = g[1]; continue; }
-      }
-      const hh = merlon ? h : h * 0.5;
-      const col = pal[k % pal.length];
-      if (alongX) {
-        box('glossy', col, a, e, y, y + hh, z0, z1, 0.3, { ao: 0 });
-        wallC(a, e, y, y + hh, z0, z1);
-        if (merlon && e - a > 3) b.part(new THREE.CylinderGeometry(0.7, 0.7, 0.5, 10), 'glossy', col, [(a + e) / 2, y + hh + 0.25, (z0 + z1) / 2]);
-      } else {
-        box('glossy', col, x0, x1, y, y + hh, a, e, 0.3, { ao: 0 });
-        wallC(x0, x1, y, y + hh, a, e);
-        if (merlon && e - a > 3) b.part(new THREE.CylinderGeometry(0.7, 0.7, 0.5, 10), 'glossy', col, [(x0 + x1) / 2, y + hh + 0.25, (a + e) / 2]);
-      }
-      a = e;
-      k++;
-    }
-  };
-
-  /** Straight hand rail (visual + wall collider). */
-  const rail = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, col: number) => {
-    box('glossy', col, x0, x1, y0, y1, z0, z1, 0.35, { ao: 0 });
-    wallC(x0, x1, y0, y1, z0, z1);
-  };
-
-  /** Flat walkway slab. */
-  const deck = (x0: number, x1: number, z0: number, z1: number, y: number, col: number, kind: MatKind = 'wood', th = 1.5) =>
-    solid(kind, col, x0, x1, y - th, y, z0, z1, 0.4);
-
-  /** Ramp / plank / ladder: visual + smooth sloped collider + optional side rails. */
-  const ramp = (o: RampOpts) => {
-    const { axis, u0, u1, h0, h1, c0, c1 } = o;
-    const surf = (u: number) => h0 + ((h1 - h0) * (u - u0)) / (u1 - u0);
-    const th = o.thick ?? 1.5;
-    const base = o.base ?? 0;
-    const bot = (u: number) => (o.solid ? base : surf(u) - th);
-    const kind = o.kind ?? 'glossy';
-    if (o.ladder) {
-      const rw = 0.9;
-      const rc = o.railCol ?? 0xf4f1ea;
-      b.part(slopedGeo(axis, u0, u1, c0, c0 + rw, (u) => surf(u) + 0.9, (u) => surf(u) - 1.6), kind, rc, [0, 0, 0], [0, 0, 0], { ao: 0 });
-      b.part(slopedGeo(axis, u0, u1, c1 - rw, c1, (u) => surf(u) + 0.9, (u) => surf(u) - 1.6), kind, rc, [0, 0, 0], [0, 0, 0], { ao: 0 });
-      const len = Math.hypot(u1 - u0, h1 - h0);
-      const n = Math.max(2, Math.floor(len / 2.4));
-      for (let i = 0; i < n; i++) {
-        const ua = u0 + ((u1 - u0) * (i + 0.25)) / n;
-        b.part(slopedGeo(axis, ua, ua + 0.9, c0 + rw, c1 - rw, surf, (u) => surf(u) - 0.9), kind, o.cols[i % o.cols.length], [0, 0, 0], [0, 0, 0], { ao: 0 });
-      }
-    } else {
-      const segs = o.segs ?? Math.max(1, Math.round((u1 - u0) / 7));
-      for (let i = 0; i < segs; i++) {
-        const ua = u0 + ((u1 - u0) * i) / segs, ub = u0 + ((u1 - u0) * (i + 1)) / segs;
-        b.part(slopedGeo(axis, ua, ub, c0, c1, surf, bot), kind, o.cols[i % o.cols.length], [0, 0, 0], [0, 0, 0], { ao: 0.2 });
-      }
-    }
-    const fp = axis === 'x' ? { minX: u0, maxX: u1, minZ: c0, maxZ: c1 } : { minX: c0, maxX: c1, minZ: u0, maxZ: u1 };
-    world.addRamp({
-      minX: fp.minX * CM, maxX: fp.maxX * CM, minZ: fp.minZ * CM, maxZ: fp.maxZ * CM,
-      axis, u0: u0 * CM, u1: u1 * CM, h0: h0 * CM, h1: h1 * CM, thick: o.solid ? 1000 : th * CM,
-    });
-    const railH = o.railH ?? 3;
-    const rc = o.railCol ?? 0xffcf33;
-    (o.rails ?? [false, false]).forEach((on, side) => {
-      if (!on) return;
-      const ca = side === 0 ? c0 - 1.25 : c1 + 0.05, cb = ca + 1.2;
-      const rbot = (u: number) => (o.solid ? base : surf(u) - th - 0.3);
-      b.part(slopedGeo(axis, u0, u1, ca, cb, (u) => surf(u) + railH, rbot), 'glossy', rc, [0, 0, 0], [0, 0, 0], { ao: 0 });
-      const n = Math.max(2, Math.ceil((u1 - u0) / 2.5));
-      for (let i = 0; i < n; i++) {
-        const ua = u0 + ((u1 - u0) * i) / n, ub = u0 + ((u1 - u0) * (i + 1)) / n;
-        const hi = Math.max(surf(ua), surf(ub)) + railH;
-        const lo = o.solid ? base : Math.min(surf(ua), surf(ub)) - th - 0.3;
-        if (axis === 'x') wallC(ua, ub, lo, hi, ca, cb);
-        else wallC(ca, cb, lo, hi, ua, ub);
-      }
-    });
-  };
-
-  const glowDot = (x: number, y: number, z: number, col = 0xffd27a) =>
-    b.part(new THREE.SphereGeometry(1.1, 10, 8), 'glow', col, [x, y, z], [0, 0, 0], { shadow: false });
+  const { add, box, solid, wall, parapet, rail, deck, ramp, glowDot, slopeRail } = makeKit(b, world);
 
   const KEEP = [0xe8453c, 0x3f7fd9, 0xffcf33, 0xf4f1ea, 0x5bbf6a];
   const INNER = [0xf4f1ea, 0xffcf33, 0x8fc6ef];
@@ -258,7 +62,7 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     solid('painted', roofCol, 89, 120, Y1, RT, -60, -49.5, 0.3);
     // battlements: openings for the tower ramp (NW) and the back ladder (S)
     parapet(60, 120, -60, -58.5, RT, KEEP, [[60, 68]]);
-    parapet(60, 120, -1.5, 0, RT, KEEP, [[108, 116]]);
+    parapet(60, 120, -1.5, 0, RT, KEEP, [[96, 102], [108, 116]]);
     parapet(60, 61.5, -58.5, -1.5, RT, KEEP);
     parapet(118.5, 120, -58.5, -1.5, RT, KEEP);
     // cover inside the great hall and the rooms
@@ -272,7 +76,7 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     glowDot(116.6, 53, -16);
     glowDot(75, 53, -56.6);
     // back ladder from the bed up to the roof
-    ramp({ axis: 'z', u0: 0, u1: 11, h0: RT, h1: Y0, c0: 108, c1: 116, ladder: true, thick: 1.2, cols: [0xe8453c, 0xffcf33] });
+    ramp({ axis: 'z', u0: 0, u1: 11, h0: RT, h1: Y0, c0: 108, c1: 116, ladder: true, thick: 1.2, cols: [0xe8453c, 0xffcf33], rails: [true, true], railH: 2.6, railCol: 0xf4f1ea });
 
     // ---- watch tower (NW of the keep): guard room at bed level, deck at 74
     const T0 = 47, TT = 74;
@@ -294,7 +98,7 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     rail(68.05, 69.25, TT - 1.5, TT + 3, -82, -74, 0xe8453c);
 
     // ---- ladder from the tower to the window-sill sniper ledge (90)
-    ramp({ axis: 'z', u0: -91, u1: -80, h0: 90, h1: TT, c0: 48, c1: 56, ladder: true, thick: 1.2, cols: [0x3f7fd9, 0xf4f1ea] });
+    ramp({ axis: 'z', u0: -91, u1: -80, h0: 90, h1: TT, c0: 48, c1: 56, ladder: true, thick: 1.2, cols: [0x3f7fd9, 0xf4f1ea], rails: [true, true], railH: 2.6, railCol: 0xffcf33 });
     deck(46, 58, -111, -91, 90, 0xe9c27a);
     rail(44.8, 46, 88.5, 92.6, -111, -91, 0x3f7fd9);
     rail(58, 59.2, 88.5, 92.6, -111, -91, 0x3f7fd9);
@@ -325,7 +129,7 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     parapet(-98.5, -65.5, -96, -94.5, DR, BUNKER);
     glowDot(-81, 80, -94.3);
     // book staircase onto the bunker roof
-    ramp({ axis: 'x', u0: -126, u1: -100, h0: D, h1: DR, c0: -92, c1: -80, solid: true, base: D, cols: BOOKS, segs: 6 });
+    ramp({ axis: 'x', u0: -126, u1: -100, h0: D, h1: DR, c0: -92, c1: -80, solid: true, base: D, cols: BOOKS, segs: 6, rails: [true, true], railH: 2.6, railCol: 0xf4f1ea });
     // books lying around as cover
     solid('painted', 0x3f7fd9, -131, -113, D, D + 3, -116, -103, 0.6);
     solid('painted', 0xf2c84b, -129, -116, D + 3, D + 6, -114, -105, 0.6);
@@ -334,7 +138,7 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     // big atlas leaning from the chair seat (46.5) up to the desk
     ramp({ axis: 'z', u0: -58, u1: -24, h0: D, h1: 46.5, c0: -64, c1: -54, thick: 2, kind: 'painted', cols: [0x2fb3b3, 0x2a8f8f], segs: 2, rails: [true, true], railCol: 0xffcf33 });
     // plastic ladder from the floor up to the chair seat
-    ramp({ axis: 'x', u0: -110, u1: -79, h0: 0, h1: 46.5, c0: -46, c1: -38, ladder: true, thick: 1.2, cols: [0xff4d3d, 0xffcf33, 0x3fa9ff] });
+    ramp({ axis: 'x', u0: -110, u1: -79, h0: 0, h1: 46.5, c0: -46, c1: -38, ladder: true, thick: 1.2, cols: [0xff4d3d, 0xffcf33, 0x3fa9ff], rails: [true, true], railH: 2.6, railCol: 0xf4f1ea });
   }
 
   // ======================================================================= BOOKSHELF BALCONY (83)
@@ -349,7 +153,7 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     rail(-105.25, -104.05, Y - 1.5, Y + 3, 50, 80, 0x3f7fd9);
     // pencil stilts
     const pcols = [0xffcf33, 0xff4d3d, 0x5bbf6a];
-    [-12, 28, 62].forEach((z, i) => {
+    [-12, 20, 44].forEach((z, i) => {
       solid('painted', pcols[i], -101, -98, 0, Y - 1.5, z, z + 3, 0.4);
     });
   }
@@ -368,16 +172,19 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
       k++;
     }
     add(-132.5, -121, 83, 111, -27, 5);
-    ramp({ axis: 'z', u0: 5, u1: 40, h0: 83, h1: 123, c0: -132.5, c1: -121, solid: true, base: 83, cols: BOOKS, segs: 7 });
+    ramp({ axis: 'z', u0: 5, u1: 40, h0: 83, h1: 123, c0: -132.5, c1: -121, solid: true, base: 83, cols: BOOKS, segs: 7, rails: [false, true], railFrom: 10, railH: 2.6, railCol: 0xf4f1ea });
     // landing at the top, flush with the upper shelf
     solid('painted', 0x3f7fd9, -132.5, -121, 83, 123, 40, 47, 0.4);
     // cover in the lower gallery
     solid('painted', 0x9b59d0, -118, -108, 83, 86, 18, 25, 0.5);
     solid('painted', 0xf06292, -117, -112, 83, 108, -8, -4, 0.5);
     // upper gallery stair (a plank of books leaning up to the hatch)
-    ramp({ axis: 'z', u0: -27, u1: 12, h0: 160, h1: 123, c0: -132.5, c1: -121, thick: 2.5, cols: BOOKS, segs: 6 });
+    ramp({ axis: 'z', u0: -27, u1: 12, h0: 160, h1: 123, c0: -132.5, c1: -121, solid: true, base: 123, cols: BOOKS, segs: 6, rails: [false, true], railFrom: -20, railH: 2.6, railCol: 0xf4f1ea });
+    // upper gallery: a rail of books along the front, open to the cargo-plane gangway
+    rail(-105.5, -104.5, 123, 125.6, -27, 26, 0xe35d4f);
+    rail(-105.5, -104.5, 123, 125.6, 36, 47, 0xe35d4f);
     // crow's nest: book battlement along the front edge
-    parapet(-106, -104.5, -27, 47, 160, [0xe35d4f, 0x3f7fd9, 0xf2c84b]);
+    parapet(-106, -104.5, -27, 47, 160, [0xe35d4f, 0x3f7fd9, 0xf2c84b], [[36, 47]]);
   }
 
   // ======================================================================= TOY-CHEST TOWER (83)
@@ -394,7 +201,46 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
   }
 
   // ======================================================================= CRATE -> BED LADDER, BED SLIDE
-  ramp({ axis: 'z', u0: 84.5, u1: 95.5, h0: 47, h1: 30, c0: 32, c1: 40, ladder: true, thick: 1.2, cols: [0x5bbf6a, 0xf4f1ea] });
+  ramp({ axis: 'z', u0: 84.5, u1: 95.5, h0: 47, h1: 30, c0: 32, c1: 40, ladder: true, thick: 1.2, cols: [0x5bbf6a, 0xf4f1ea], rails: [true, true], railTo: 90, railH: 2.6, railCol: 0xf4f1ea });
+
+  // ======================================================================= EDGE SAFETY
+  // Low toy barriers along drops you could run off by accident. All of them are
+  // jumpable (2.2-2.6 cm against a 4.9 cm jump), and open wherever a route arrives.
+  {
+    // picket fence along the open bed edges
+    const picket = (x0: number, x1: number, z0: number, z1: number, gaps: [number, number][] = []) => parapet(x0, x1, z0, z1, 47, [0xf4f1ea, 0xffcf33], gaps, 2.4);
+    picket(29.2, 30.4, -67, -17.5);
+    picket(29.2, 30.4, 1.5, 82.2);
+    picket(29.2, 130, 82.2, 83.4, [[32, 40], [95, 105]]);
+    // pencil fence along the desk edges (open at the ramps, the atlas, the tube and the sky bridge)
+    const pencil = (x0: number, x1: number, z0: number, z1: number) => rail(x0, x1, 74, 76.2, z0, z1, 0xffcf33);
+    pencil(-134, -104, -59.2, -58);
+    pencil(-95, -64, -59.2, -58);
+    pencil(-54, -26.5, -59.2, -58);
+    pencil(-13.2, -12, -120, -76.5);
+    // under the desk-to-hub tube mouth
+    pencil(-26.5, -12, -59.2, -58);
+    pencil(-13.2, -12, -66, -59.2);
+    // crate rim (open to the stairs, the ruler bridge and the ladder)
+    const rim = (x0: number, x1: number, z0: number, z1: number) => rail(x0, x1, 30, 32.2, z0, z1, 0x2f8be0);
+    rim(0, 40, 114.8, 116);
+    rim(0, 32, 86, 87.2);
+    rim(0, 1.2, 87.2, 95);
+    rim(0, 1.2, 105, 114.8);
+    rim(38.8, 40, 87.2, 90);
+    rim(38.8, 40, 112, 114.8);
+    // toy-chest rim (open to the ruler bridge and the block ramp)
+    rail(-41.2, -40, 45, 47.2, 80, 95, 0xffcf33);
+    rail(-41.2, -40, 45, 47.2, 105, 118, 0xffcf33);
+    rail(-45, -41.2, 45, 47.2, 80, 81.2, 0xffcf33);
+    // ruler bridge hand rails
+    slopeRail('x', -40, 0, 45, 30, 93.75, 94.95, 2.4, 0xd64c3f);
+    slopeRail('x', -40, 0, 45, 30, 105.05, 106.25, 2.4, 0xd64c3f);
+    // window-sill lip (open where the walkway arrives)
+    rail(-5, 8, 90, 92.2, -111.2, -110, 0xfbf8f2);
+    rail(22, 46, 90, 92.2, -111.2, -110, 0xfbf8f2);
+    rail(58, 115, 90, 92.2, -111.2, -110, 0xfbf8f2);
+  }
   ramp({ axis: 'z', u0: 84.5, u1: 114, h0: 47, h1: 0, c0: 95, c1: 105, solid: true, cols: [0xff4d3d], segs: 1, rails: [true, true], railH: 2.5, railCol: 0xffcf33 });
 
   return [
