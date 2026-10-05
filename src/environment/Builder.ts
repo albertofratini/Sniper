@@ -168,7 +168,10 @@ export class Builder {
     const size = local.getSize(new THREE.Vector3());
     const cell = Math.max(0.5, Math.min(size.x, size.y, size.z) / 1.5);
     const nx = Math.min(8, Math.max(1, Math.round(size.x / cell)));
-    const ny = Math.min(4, Math.max(1, Math.round(size.y / cell)));
+    // objects only rotated about the vertical axis are never split in height:
+    // stacked cells would create hidden ledges inside the object
+    const upright = Math.abs(e[5] / sy) > 0.98;
+    const ny = upright ? 1 : Math.min(4, Math.max(1, Math.round(size.y / cell)));
     const nz = Math.min(8, Math.max(1, Math.round(size.z / cell)));
     const c = new THREE.Box3();
     for (let i = 0; i < nx; i++)

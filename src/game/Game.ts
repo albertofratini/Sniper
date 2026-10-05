@@ -124,6 +124,7 @@ export class Game {
     this.room.spawnPoints.forEach(fix);
     this.room.pickupSpots.forEach((sp) => fix(sp.pos));
     fix(this.room.playerSpawn);
+    this.room.playerSpawns = this.computeArenaSpawns();
 
     const aspect = window.innerWidth / window.innerHeight;
     this.player = new Player(this.world, aspect);
@@ -216,6 +217,61 @@ export class Game {
       if (Math.hypot(p.x - cx, p.z - cz) < r) return true;
     }
     return false;
+  }
+
+  /**
+   * Multiplayer spawn points: open floor toward the middle of the room, never
+   * under furniture, on the ramp, or tucked behind objects or against walls.
+   */
+  private computeArenaSpawns(): THREE.Vector3[] {
+    this.nav.update(this.room.playerSpawn.x, this.room.playerSpawn.z);
+    const dirs = Array.from({ length: 8 }, (_, i) => new THREE.Vector3(Math.cos((i / 8) * Math.PI * 2), 0, Math.sin((i / 8) * Math.PI * 2)));
+    const cands: { p: THREE.Vector3; score: number }[] = [];
+    const track = Array.from({ length: 64 }, (_, i) => this.room.trainPath((i / 64) * Math.PI * 2, new THREE.Vector3()));
+    for (let x = -60; x <= 60; x += 2)
+      for (let z = -54; z <= 54; z += 2) {
+        const p = new THREE.Vector3(x, 0, z);
+        if (this.spotBlocked(p, 2.6, 2.2)) continue;
+        // never on the train track
+        if (track.some((t) => Math.hypot(t.x - x, t.z - z) < 4)) continue;
+        if (this.nav.distAt(x, z) < 0) continue;
+        if (this.world.groundAt(x, z, 50) > 0.01) continue; // ramp / raised surfaces
+        // nothing overhead (desk, bed, chair seat, ramp)
+        let roofed = false;
+        for (const b of this.world.query(x - 1.5, z - 1.5, x + 1.5, z + 1.5)) {
+          if (b.minY > 1.9 && b.minY < 60 && x + 1.5 > b.minX && x - 1.5 < b.maxX && z + 1.5 > b.minZ && z - 1.5 < b.maxZ) { roofed = true; break; }
+        }
+        if (roofed) continue;
+        // openness: how far you can see around you at chest height
+        const eye = new THREE.Vector3(x, 1.4, z);
+        let open = 0;
+        for (const d of dirs) {
+          const h = this.world.raycast(eye, d, 40);
+          open += Math.min(40, h ? h.dist : 40);
+        }
+        if (open < 150) continue; // boxed in
+        // must be out in the open middle: close to the play mat and able to see it
+        const mid = new THREE.Vector3(-12, 1.4, 22);
+        if (Math.hypot(x - mid.x, z - mid.z) > 52) continue;
+        const refs = [mid, new THREE.Vector3(8, 1.4, 30), new THREE.Vector3(-34, 1.4, 12), new THREE.Vector3(-12, 1.4, 44)];
+        if (refs.filter((r) => this.world.lineOfSight(eye, r)).length < 2) continue;
+        const centre = 1 - Math.hypot((x - mid.x) / 60, (z - mid.z) / 60);
+        cands.push({ p, score: open / 320 + centre * 0.8 });
+      }
+    cands.sort((a, b) => b.score - a.score);
+    const pool = cands.slice(0, Math.max(12, Math.floor(cands.length * 0.75)));
+    // spread them out: farthest-point sampling starting from the best spot
+    const picked: THREE.Vector3[] = [];
+    if (pool.length) picked.push(pool[0].p);
+    while (picked.length < 10 && picked.length < pool.length) {
+      let best = pool[0].p, bd = -1;
+      for (const c of pool) {
+        const d = Math.min(...picked.map((q) => q.distanceTo(c.p)));
+        if (d > bd) { bd = d; best = c.p; }
+      }
+      picked.push(best);
+    }
+    return picked.length >= 4 ? picked : this.room.playerSpawns;
   }
 
   /** Nearest floor position around p with room for a soldier. */

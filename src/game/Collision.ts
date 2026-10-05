@@ -3,8 +3,9 @@ import * as THREE from 'three';
 export interface Box {
   minX: number; minY: number; minZ: number;
   maxX: number; maxY: number; maxZ: number;
-  /** solid boxes block bullets; soft boxes (fabric etc.) still do */
   id: number;
+  /** thin wall: never stepped or stood on (things slide off its top) */
+  wall?: boolean;
 }
 
 export interface RayHit {
@@ -106,14 +107,22 @@ export class CollisionWorld {
   moveCylinder(pos: THREE.Vector3, vel: THREE.Vector3, dt: number, radius: number, height: number, step = 0.6, snap = 0.02): boolean {
     let grounded = false;
     const prevY = pos.y;
+    const prevX = pos.x, prevZ = pos.z;
 
     // ---- horizontal ----
-    pos.x += vel.x * dt;
-    pos.z += vel.z * dt;
-    const cand = this.query(pos.x - radius - 1, pos.z - radius - 1, pos.x + radius + 1, pos.z + radius + 1).slice();
-    for (let iter = 0; iter < 2; iter++) {
+    // Sub-step fast moves so nothing can tunnel through thin walls (each step < half the thinnest collider).
+    const mx = vel.x * dt, mz = vel.z * dt;
+    const steps = Math.min(16, Math.max(1, Math.ceil(Math.hypot(mx, mz) / 0.2)));
+    const cand = this.query(
+      Math.min(pos.x, pos.x + mx) - radius - 1, Math.min(pos.z, pos.z + mz) - radius - 1,
+      Math.max(pos.x, pos.x + mx) + radius + 1, Math.max(pos.z, pos.z + mz) + radius + 1,
+    ).slice();
+    for (let st = 0; st < steps; st++) {
+    pos.x += (vel.x * dt) / steps;
+    pos.z += (vel.z * dt) / steps;
+    for (let iter = 0; iter < (radius > 1 ? 4 : 2); iter++) {
       for (const b of cand) {
-        if (b.maxY <= pos.y + step || b.minY >= pos.y + height) continue;
+        if (b.maxY <= pos.y + (b.wall ? 0.02 : step) || b.minY >= pos.y + height) continue;
         this.pushOut(pos, vel, radius, b.minX, b.maxX, b.minZ, b.maxZ);
       }
       // ramps block from the sides / underneath where the surface is too high to step onto
@@ -121,11 +130,14 @@ export class CollisionWorld {
         if (pos.x + radius <= rp.minX || pos.x - radius >= rp.maxX || pos.z + radius <= rp.minZ || pos.z - radius >= rp.maxZ) continue;
         const s = rampSurface(rp, Math.max(rp.minX, Math.min(rp.maxX, pos.x)), Math.max(rp.minZ, Math.min(rp.maxZ, pos.z)));
         if (s <= pos.y + step || s - rp.thick >= pos.y + height) continue;
+        // inside the footprint the wedge lifts you (vertical pass); it only blocks from outside
+        if (pos.x > rp.minX && pos.x < rp.maxX && pos.z > rp.minZ && pos.z < rp.maxZ) continue;
         this.pushOut(pos, vel, radius, rp.minX, rp.maxX, rp.minZ, rp.maxZ);
       }
     }
     pos.x = Math.max(ROOM.minX + radius, Math.min(ROOM.maxX - radius, pos.x));
     pos.z = Math.max(ROOM.minZ + radius, Math.min(ROOM.maxZ - radius, pos.z));
+    }
 
     // ---- vertical ----
     pos.y += vel.y * dt;
@@ -134,6 +146,7 @@ export class CollisionWorld {
     const reach = Math.max(prevY, pos.y) + step + 0.001;
     for (const b of cand) {
       if (pos.x + r2 <= b.minX || pos.x - r2 >= b.maxX || pos.z + r2 <= b.minZ || pos.z - r2 >= b.maxZ) continue;
+      if (b.wall) continue;
       if (b.maxY <= reach && vel.y <= 0.01) {
         if (b.maxY > support) support = b.maxY;
         continue;
@@ -157,6 +170,28 @@ export class CollisionWorld {
       pos.y = 0;
       if (vel.y < 0) vel.y = 0;
       grounded = true;
+    }
+    // the ramp is a solid wedge: anything whose centre is over it can't be below its surface
+    for (const rp of this.ramps) {
+      if (pos.x <= rp.minX || pos.x >= rp.maxX || pos.z <= rp.minZ || pos.z >= rp.maxZ) continue;
+      const s = rampSurface(rp, pos.x, pos.z);
+      if (pos.y < s) {
+        pos.y = s;
+        if (vel.y < 0) vel.y = 0;
+        grounded = true;
+      }
+    }
+    // never step up into a low ceiling (e.g. under the bed): undo the move instead
+    if (grounded && pos.y > prevY + 0.001) {
+      for (const b of cand) {
+        if (pos.x + r2 <= b.minX || pos.x - r2 >= b.maxX || pos.z + r2 <= b.minZ || pos.z - r2 >= b.maxZ) continue;
+        if (b.minY < pos.y + height - 0.01 && b.maxY > pos.y + height - 0.01 && b.minY > pos.y + 0.01) {
+          pos.set(prevX, prevY, prevZ);
+          vel.x = 0;
+          vel.z = 0;
+          break;
+        }
+      }
     }
     if (pos.y + height > ROOM.height) {
       pos.y = ROOM.height - height;

@@ -239,19 +239,33 @@ export function buildBedroom(mats: Materials, world: CollisionWorld): BedroomInf
       const h = sy / 3;
       b.box('painted', c, sx - 5 + i * 0.3, sx + 5 - i * 0.3, i * h, (i + 1) * h - 0.3, -16 + i, 0 - i, 0.8, { collide: true });
     });
+    // side skirts (visible wedge panels from the floor up to the walls)
+    for (const zz of [top.z - 7.6, top.z + 7.6]) {
+      // one quad per facing direction (separate vertices so normals stay valid)
+      for (const flip of [false, true]) {
+        const g = new THREE.BufferGeometry();
+        const P = [bot.x - 2, 0, zz, top.x, 0, zz, top.x, top.y + 5, zz, bot.x - 2, 5, zz];
+        g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+        g.setIndex(flip ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3]);
+        g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 0.1], 2));
+        g.computeVertexNormals();
+        b.part(g, 'glossy', 0xf07d14, [0, 0, 0], [0, 0, 0], { ao: 0.5 });
+      }
+    }
     // wall colliders following the slope (world units)
     const segs = 30;
     for (let i = 0; i < segs; i++) {
       const xa = bot.x + (dx * i) / segs, xb = bot.x + (dx * (i + 1)) / segs;
-      const ya = bot.y + (dy * i) / segs, yb = bot.y + (dy * (i + 1)) / segs;
+      const yb = bot.y + (dy * (i + 1)) / segs;
       for (const [z0, z1] of [[top.z - 7.8, top.z - 6.2], [top.z + 6.2, top.z + 7.8]]) {
-        world.add(xa * CM, Math.max(0, ya - 1) * CM, z0 * CM, xb * CM, (yb + 5.8) * CM, z1 * CM);
+        world.add(xa * CM, 0, z0 * CM, xb * CM, (yb + 7.5) * CM, z1 * CM).wall = true;
       }
     }
     // smooth sloped walking surface (world units)
     world.addRamp({
       minX: bot.x * CM, maxX: top.x * CM, minZ: (top.z - 6.2) * CM, maxZ: (top.z + 6.2) * CM,
-      axis: 'x', u0: bot.x * CM, u1: top.x * CM, h0: bot.y * CM, h1: top.y * CM, thick: 1.2 * CM,
+      // solid wedge down to the floor: nothing can get underneath and get trapped
+      axis: 'x', u0: bot.x * CM, u1: top.x * CM, h0: bot.y * CM, h1: top.y * CM, thick: 1000,
     });
   }
 
