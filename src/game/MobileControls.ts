@@ -116,7 +116,9 @@ export class MobileControls {
     // block iOS gestures / double-tap zoom
     for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault());
     document.addEventListener('touchmove', (e) => {
-      if (!(e.target as HTMLElement).closest('input')) e.preventDefault();
+      // menus scroll (short landscape phones); everything else (gameplay) stays locked
+      const t = e.target as HTMLElement;
+      if (!t.closest('input') && !t.closest('.screen')) e.preventDefault();
     }, { passive: false });
     let lastTouch = 0;
     document.addEventListener('touchend', (e) => {

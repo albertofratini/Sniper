@@ -196,6 +196,9 @@ body.is-touch .desktop-only { display: none !important; }
     linear-gradient(180deg, rgba(25, 12, 40, .35), rgba(15, 8, 25, .85));
   padding: calc(16px + var(--sat)) calc(16px + var(--sar)) calc(16px + var(--sab)) calc(16px + var(--sal));
 }
+/* menus scroll when they don't fit (phones held sideways); centred when they do */
+.screen { overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
+.screen:not(#lobby) > * { margin-top: auto; margin-bottom: auto; }
 #menu { background:
     radial-gradient(ellipse at 50% 35%, rgba(255, 190, 90, .22), rgba(0,0,0,0) 60%),
     linear-gradient(180deg, rgba(25, 12, 40, .15), rgba(15, 8, 25, .7)); }
@@ -253,9 +256,10 @@ body.is-touch .desktop-only { display: none !important; }
 @keyframes rot { 0%, 20% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
 
 @media (max-height: 430px) {
-  .logo-top { font-size: 44px; } .logo-bottom { font-size: 58px; }
-  .menu-inner { gap: 10px; }
-  .big-btn { font-size: 30px; padding: 12px 48px 8px; }
+  .logo-top { font-size: 36px; } .logo-bottom { font-size: 46px; }
+  .tagline { font-size: 15px; letter-spacing: 3px; }
+  .menu-inner { gap: 7px; }
+  .big-btn { font-size: 24px; padding: 9px 40px 6px; }
   #wave-label { font-size: 20px; } #wave-label b { font-size: 24px; }
   #wave-bar { width: 130px; }
   .chip { font-size: 18px; padding: 2px 10px; }
@@ -413,3 +417,10 @@ body.is-touch .hid-board { top: calc(64px + var(--sat)); font-size: 11px; min-wi
 body.is-touch .hid-feed { top: calc(64px + var(--sat)); left: calc(72px + var(--sal)); font-size: 11px; }
 @media (max-width: 700px) { .hid-chip { min-width: 70px; padding: 3px 8px 1px; } .hid-chip b { font-size: 18px; } .hid-warn { font-size: 28px; } }
 body.is-touch #btn-steal { width: 66px; height: 66px; right: calc(118px + var(--sar)); bottom: calc(164px + var(--sab)); font-size: 12px; }
+
+/* phones held sideways: the three play buttons side by side so the menu fits without scrolling */
+@media (max-height: 430px) and (orientation: landscape) {
+  .menu-inner { max-width: 96vw; }
+  .menu-buttons { gap: 10px; }
+  .menu-buttons .big-btn { font-size: clamp(13px, 2.4vw, 20px); padding: 10px clamp(8px, 2vw, 16px) 7px; letter-spacing: 1px; white-space: nowrap; }
+}
