@@ -92,12 +92,7 @@ export class MobileControls {
           case 'jump': this.input.jump = true; break;
           case 'reload': this.input.reload = true; break;
           case 'steal': this.input.touchSteal = true; break;
-          case 'melee': this.input.melee = true; break;
           case 'swap': this.input.swap = 1; break;
-          case 'crouch':
-            this.input.toggleCrouch();
-            btn.classList.toggle('on');
-            break;
         }
       });
       const up = (e: PointerEvent) => {

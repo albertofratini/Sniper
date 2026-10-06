@@ -186,9 +186,7 @@ body.is-touch .desktop-only { display: none !important; }
 #btn-fire.pressed { background: rgba(255, 77, 61, .8); }
 #btn-jump { width: 68px; height: 68px; right: calc(150px + var(--sar)); bottom: calc(26px + var(--sab)); }
 #btn-reload { width: 54px; height: 54px; right: calc(150px + var(--sar)); bottom: calc(118px + var(--sab)); font-size: 20px; }
-#btn-melee { width: 58px; height: 58px; right: calc(60px + var(--sar)); bottom: calc(184px + var(--sab)); font-size: 12px; }
 #btn-swap { width: 58px; height: 58px; right: calc(128px + var(--sar)); bottom: calc(190px + var(--sab)); font-size: 12px; }
-#btn-crouch { width: 54px; height: 54px; right: calc(232px + var(--sar)); bottom: calc(22px + var(--sab)); font-size: 11px; }
 
 /* ---------- Screens ---------- */
 .screen {
@@ -349,14 +347,12 @@ body.is-touch .hud-top { top: calc(6px + var(--sat)); }
 /* ---------- New touch buttons ---------- */
 #btn-aim { width: 70px; height: 70px; right: calc(34px + var(--sar)); bottom: calc(184px + var(--sab)); font-size: 12px; background: rgba(63,169,255,.4); }
 #btn-aim.pressed { background: rgba(63,169,255,.8); }
-body.is-touch #btn-melee { right: calc(128px + var(--sar)); bottom: calc(192px + var(--sab)); width: 56px; height: 56px; }
 body.is-touch #btn-swap { right: calc(248px + var(--sar)); bottom: calc(222px + var(--sab)); width: 54px; height: 54px; }
 .tbtn.nade { width: 52px; height: 52px; font-size: 20px; }
 .tbtn.nade i { position: absolute; right: -4px; top: -4px; font-style: normal; font-size: 12px; background: var(--toy-red); border-radius: 10px; padding: 2px 6px 0; border: 2px solid #fff; }
 .tbtn.nade.empty { opacity: .35; }
 #btn-frag { right: calc(249px + var(--sar)); bottom: calc(90px + var(--sab)); }
 #btn-flash { right: calc(249px + var(--sar)); bottom: calc(154px + var(--sab)); }
-#btn-crouch { right: calc(248px + var(--sar)); bottom: calc(22px + var(--sab)); }
 #weapon-slots span.hidden { display: none !important; }
 
 /* ---------- Compact thumb cluster (raised, tighter to the edge) ----------
@@ -366,9 +362,7 @@ body.is-touch #btn-fire { width: 82px; height: 82px; right: calc(26px + var(--sa
 body.is-touch #btn-aim { width: 60px; height: 60px; right: calc(30px + var(--sar)); bottom: calc(214px + var(--sab)); font-size: 11px; }
 body.is-touch #btn-jump { width: 58px; height: 58px; right: calc(124px + var(--sar)); bottom: calc(92px + var(--sab)); font-size: 13px; }
 body.is-touch #btn-reload { width: 46px; height: 46px; right: calc(128px + var(--sar)); bottom: calc(166px + var(--sab)); font-size: 18px; }
-body.is-touch #btn-melee { width: 48px; height: 48px; right: calc(112px + var(--sar)); bottom: calc(226px + var(--sab)); font-size: 11px; }
 body.is-touch #btn-swap { width: 46px; height: 46px; right: calc(178px + var(--sar)); bottom: calc(232px + var(--sab)); font-size: 11px; }
-body.is-touch #btn-crouch { width: 46px; height: 46px; right: calc(192px + var(--sar)); bottom: calc(70px + var(--sab)); font-size: 10px; }
 body.is-touch .tbtn.nade { width: 44px; height: 44px; font-size: 18px; }
 body.is-touch #btn-frag { right: calc(192px + var(--sar)); bottom: calc(172px + var(--sab)); }
 body.is-touch #btn-flash { right: calc(244px + var(--sar)); bottom: calc(200px + var(--sab)); }
@@ -383,7 +377,7 @@ body.is-touch #btn-flash { right: calc(244px + var(--sar)); bottom: calc(200px +
 #btn-steal.ready { background: rgba(255, 207, 51, .5); border-color: #fff; }
 #btn-steal.pressed { background: rgba(255, 207, 51, .85); }
 body.hidden-mode #btn-steal { display: flex; }
-body.hidden-mode #btn-reload, body.hidden-mode #btn-melee, body.hidden-mode #btn-swap, body.hidden-mode #btn-crouch,
+body.hidden-mode #btn-reload, body.hidden-mode #btn-swap,
 body.hidden-mode #btn-aim, body.hidden-mode .tbtn.nade,
 body.hidden-mode .hud-top, body.hidden-mode .hud-topright, body.hidden-mode .hud-bottomleft, body.hidden-mode .hud-bottomright { display: none !important; }
 body.hidden-mode #crosshair { --gap: 3px; }
