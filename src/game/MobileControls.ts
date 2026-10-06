@@ -91,6 +91,7 @@ export class MobileControls {
           case 'flash': this.input.throwFlash = true; break;
           case 'jump': this.input.jump = true; break;
           case 'reload': this.input.reload = true; break;
+          case 'steal': this.input.touchSteal = true; break;
           case 'melee': this.input.melee = true; break;
           case 'swap': this.input.swap = 1; break;
           case 'crouch':
@@ -109,6 +110,7 @@ export class MobileControls {
           this.input.setTouchAim(false);
           lookEnd(e);
         }
+        if (act === 'steal') this.input.touchSteal = false;
       };
       if (act === 'fire' || act === 'aim') btn.addEventListener('pointermove', lookMove);
       btn.addEventListener('pointerup', up);
@@ -162,6 +164,7 @@ export class MobileControls {
       this.moveId = null;
       this.input.setTouchMove(0, 0, false);
       this.input.setTouchFire(false);
+      this.input.touchSteal = false;
       this.root.querySelectorAll('.tbtn').forEach((b) => b.classList.remove('pressed'));
     }
   }

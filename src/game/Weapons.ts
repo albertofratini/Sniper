@@ -141,6 +141,12 @@ export class WeaponSystem {
     return WEAPONS[this.current];
   }
 
+  /** hide the gun view-models (Hidden Troopers has no visible weapon) */
+  setHidden(v: boolean) {
+    this.holder.visible = !v;
+    this.flash.visible = false;
+  }
+
   get scoped() {
     return this.def.sniper === true && this.adsT > 0.85;
   }

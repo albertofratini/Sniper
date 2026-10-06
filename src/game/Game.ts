@@ -22,6 +22,7 @@ import { HUD } from '../ui/HUD';
 import { audio } from './Audio';
 import type { Session } from '../net/Session';
 import type { RemoteAvatar } from '../net/RemotePlayers';
+import { HiddenMode } from '../modes/hidden/HiddenMode';
 
 export type GameState = 'menu' | 'playing' | 'paused' | 'dying' | 'over' | 'mpover';
 
@@ -58,6 +59,8 @@ export class Game {
   /** 'survival' = solo waves; otherwise a multiplayer mode */
   mode: 'survival' | ModeId = 'survival';
   mp: Session | null = null;
+  /** Hidden Troopers rules + crowd, while that mode runs */
+  hidden: HiddenMode | null = null;
   nades = { frag: 2, flash: 1 };
   blind = 0;
 
@@ -420,6 +423,16 @@ export class Game {
     this.pickups.clear();
     const sp = this.pickSpawn();
     this.player.spawn(sp, Math.atan2(sp.x, sp.z));
+    if (this.mode === 'hidden') {
+      // everyone walks at the crowd's pace, can't be hurt by stray toys, and carries no visible gun
+      this.player.speedMul = 0.6;
+      this.player.godMode = true;
+      this.weapons.setHidden(true);
+      this.hidden = new HiddenMode(this, s);
+      s.hidden = this.hidden;
+      this.beginPlay();
+      return;
+    }
     this.beginPlay();
     if (this.mode === 'coop') {
       if (s.isLeader) this.waves.start();
@@ -490,6 +503,14 @@ export class Game {
   }
 
   private resetWorld() {
+    if (this.hidden) {
+      this.hidden.dispose();
+      if (this.mp) this.mp.hidden = null;
+      this.hidden = null;
+      this.player.speedMul = 1;
+      this.player.godMode = false;
+      this.weapons.setHidden(false);
+    }
     for (const e of this.enemies) e.dispose(this.scene);
     this.enemies = [];
     this.boss = null;
@@ -1078,6 +1099,11 @@ export class Game {
   // ------------------------------------------------------------------ aim assist
 
   private updateAim(dt: number) {
+    // Hidden Troopers: no aim assist and no "on target" crosshair, they would point out the real players
+    if (this.hidden) {
+      this.onTarget = false;
+      return;
+    }
     const cam = this.player.camera;
     const fwd = this.player.forward();
     const origin = cam.position;
@@ -1250,6 +1276,11 @@ export class Game {
     const sniperAds = this.weapons.def.sniper && this.weapons.adsT > 0.5;
     pl.zoomFov = sniperAds ? 24 : null;
     input.lookScale = this.weapons.scoped ? 0.35 : 1;
+    if (this.hidden) {
+      this.updateHidden(dt, this.hidden);
+      input.endFrame();
+      return;
+    }
     pl.update(dt, input, this.weapons.def.speedMul * (this.weapons.adsT > 0.5 ? 0.6 : 1));
     this.shotEnds = [];
     this.shotWeapon = -1;
@@ -1337,6 +1368,23 @@ export class Game {
       if (this.inMatch && pl.alive) this.state = 'playing';
     }
     input.endFrame();
+  }
+
+  /** One frame of Hidden Troopers: plain walking (or a spectator camera), the mode's rules, the world. */
+  private updateHidden(dt: number, h: HiddenMode) {
+    const pl = this.player, input = this.input;
+    input.crouch = false; // the crowd never crouches
+    if (this.state === 'mpover') input.reset();
+    if (h.spectator) h.spectate(dt);
+    else pl.update(dt, input, 1);
+    h.update(dt);
+    this.proj.update(dt, this.projHooks);
+    if (!h.spectator) {
+      this.props.update(dt, [{ pos: pl.pos, vel: pl.vel, r: pl.radius }]);
+      this.trainCollide(dt);
+    }
+    if (this.mp && this.mp.self.inMatch) this.mp.update(dt);
+    this.hud.crosshair(0, false);
   }
 
   /** Could the player use this pickup right now? */

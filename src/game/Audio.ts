@@ -281,6 +281,34 @@ export class Audio {
     if (!this.ctx || this.muted) return;
     this.chord([392, 370, 349, 262], 0.25, 0.5, 0.12, 'triangle');
   }
+  // ---- Hidden Troopers
+  /** countdown beep before an elimination (higher on the last seconds) */
+  beep(urgent = false) {
+    if (!this.ctx || this.muted) return;
+    this.tone('square', urgent ? 1180 : 880, urgent ? 1180 : 880, 0.09, 0.12);
+  }
+  /** a small toy cap-pistol crack */
+  pistol(dist = 0) {
+    if (!this.ok('pistol', 0.05)) return;
+    const v = 1 / (1 + dist * 0.04);
+    this.burst(0.12, 0.8 * v, 'highpass', 1800, 900);
+    this.tone('square', 900, 180, 0.07, 0.25 * v);
+  }
+  /** the quiet "got it" pop when a steal completes */
+  steal() {
+    if (!this.ctx || this.muted) return;
+    this.chord([659, 988], 0.07, 0.18, 0.1);
+  }
+  /** soft rising tick while holding a steal */
+  stealTick(k: number) {
+    if (!this.ok('stealtick', 0.2)) return;
+    this.tone('sine', 500 + k * 500, 520 + k * 500, 0.04, 0.05);
+  }
+  eliminated() {
+    if (!this.ctx || this.muted) return;
+    this.chord([523, 392, 311], 0.16, 0.35, 0.12, 'triangle');
+    this.burst(0.4, 0.15, 'lowpass', 900, 120);
+  }
   bossRoar() {
     if (!this.ctx || this.muted) return;
     this.windup();

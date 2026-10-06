@@ -4,6 +4,7 @@ import { audio } from './game/Audio';
 import { Session } from './net/Session';
 import { randomRoomCode } from './net/Net';
 import { BotManager, Difficulty } from './bots/BotManager';
+import { HiddenBots } from './modes/hidden/HiddenBots';
 import { MODES, ModeId, TEAM_NAMES } from './game/Modes';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -256,7 +257,7 @@ requestAnimationFrame(() =>
       const s = new Session('BOTS-' + randomRoomCode(), game, nameInput.value);
       const count = botCfg.mode === 'tdm' ? botCfg.size * 2 - 1 : botCfg.size;
       s.setMode(botCfg.mode, botCfg.mode === 'tdm' ? botCfg.size : 2);
-      s.bots = new BotManager(game, s, count, botCfg.diff);
+      s.bots = botCfg.mode === 'hidden' ? new HiddenBots(game, s, count, botCfg.diff) : new BotManager(game, s, count, botCfg.diff);
       s.onEnd = () => {
         const info = s.endInfo!;
         $('mp-end-title').textContent = info.title;

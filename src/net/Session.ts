@@ -6,6 +6,8 @@ import { WEAPONS } from '../game/Weapons';
 import type { Game } from '../game/Game';
 import type { Enemy, EnemyType } from '../game/Enemies';
 import { audio } from '../game/Audio';
+import { HIDDEN_MSGS } from '../modes/hidden/HiddenMode';
+import type { HiddenMode } from '../modes/hidden/HiddenMode';
 
 export interface PeerInfo {
   id: string;
@@ -57,6 +59,8 @@ export class Session {
   private wasLeader = false;
   /** extra per-frame simulation living in this room (offline bots) */
   bots: { update(dt: number): void } | null = null;
+  /** the running Hidden Troopers rules, if that's the mode */
+  hidden: HiddenMode | null = null;
   onChange: () => void = () => {};
   onEnd: () => void = () => {};
   /** last co-op snapshot info for non-leader HUD */
@@ -151,6 +155,7 @@ export class Session {
       this.avatars.delete(id);
     }
     if (was) this.game.hud.toast(`${was.name} left the room`);
+    this.hidden?.onLeave(id);
     // co-op: take over the enemies if the simulating player left
     if (this.match?.mode === 'coop' && this.self.inMatch && this.isLeader && !this.wasLeader) this.game.coopBecomeLeader(this.coopInfo);
     this.wasLeader = this.isLeader;
@@ -227,6 +232,7 @@ export class Session {
   /** current gun-game / mode loadout for the local player */
   loadout(): number[] {
     if (!this.match) return [0];
+    if (this.match.mode === 'hidden') return [0]; // no visible guns: the weapon system just idles
     if (this.match.mode === 'gungame') return [GUN_LADDER[Math.min(GUN_LADDER.length - 1, this.self.level)]];
     return MODES[this.match.mode].loadout;
   }
@@ -243,7 +249,7 @@ export class Session {
   }
 
   private checkEnd() {
-    if (!this.match || this.ended || this.match.mode === 'coop') return;
+    if (!this.match || this.ended || this.match.mode === 'coop' || this.match.mode === 'hidden') return;
     const def = MODES[this.match.mode];
     const timeUp = def.timeLimit > 0 && this.timeLeft() <= 0;
     let winner: string | null = null;
@@ -258,6 +264,18 @@ export class Session {
       else if (timeUp) winner = best ? best.name : 'NOBODY';
     }
     if (winner) this.finish(winner);
+  }
+
+  /** end the match with a mode-specific result (Hidden Troopers) */
+  finishCustom(title: string, lines: string[], won: boolean) {
+    if (this.ended) return;
+    this.ended = true;
+    this.endInfo = { title, lines };
+    if (won) audio.victory();
+    else audio.defeat();
+    this.game.matchEnded();
+    this.onEnd();
+    setTimeout(() => this.backToLobby(), 9000);
   }
 
   private finish(winner: string, coopVictory?: boolean) {
@@ -342,6 +360,7 @@ export class Session {
         av.sendDamage = (amount, fromPos, knock) => this.sendHit(from, amount, 99, fromPos, knock);
         this.avatars.set(from, av);
       }
+      av.concealed = this.match?.mode === 'hidden';
       av.applyState(s, performance.now());
     });
     t.on('shot', (d: { w: number; e: number[] }, from) => {
@@ -419,6 +438,8 @@ export class Session {
     });
     t.on('shock', (d: { p: V3 }) => this.game.spawnShockwavePublic(vec(d.p)));
     t.on('banner', (d: { a: string; b: string }) => this.game.hud.banner(d.a, d.b, 2.8));
+    // ---- Hidden Troopers (the mode owns its own protocol)
+    for (const m of HIDDEN_MSGS) t.on(m, (d, from) => this.hidden?.onNet(m, d, from));
   }
 
   // ------------------------------------------------------------------ outgoing (called by Game)
@@ -429,6 +450,7 @@ export class Session {
       p: arr(pl.pos), v: arr(pl.vel), y: +pl.yaw.toFixed(3), pi: +pl.pitch.toFixed(3),
       w: this.game.weapons.current, a: pl.alive ? 1 : 0, c: pl.crouching ? 1 : 0, h: Math.round(pl.health), r: this.game.weapons.state === 'reload' ? 1 : 0,
     };
+    if (this.hidden) Object.assign(s, this.hidden.stateExtra());
     this.t.send('st', s);
   }
 

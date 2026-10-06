@@ -15,6 +15,10 @@ export interface PlayerState {
   h: number;
   /** reloading (drives the gun tilt other players see) */
   r?: 0 | 1;
+  /** Hidden Troopers: stealing (arm out), pistol drawn, out of the game / spectating */
+  hs?: 0 | 1;
+  hg?: 0 | 1;
+  ho?: 0 | 1;
 }
 
 export interface AvatarHit { t: number; mult: number }
@@ -40,6 +44,10 @@ export class RemoteAvatar implements Target {
   weapon = 0;
   crouch = false;
   reloading = false;
+  /** never drawn itself (Hidden Troopers draws everyone as identical soldiers) */
+  concealed = false;
+  /** the latest snapshot as received */
+  last: PlayerState | null = null;
   private reloadK = 0;
   private target = new THREE.Vector3();
   private lastStateAt = 0;
@@ -152,6 +160,7 @@ export class RemoteAvatar implements Target {
   }
 
   applyState(s: PlayerState, now: number) {
+    this.last = s;
     this.target.set(s.p[0], s.p[1], s.p[2]);
     this.vel.set(s.v[0], s.v[1], s.v[2]);
     if (this.lastStateAt === 0 || this.pos.distanceTo(this.target) > 12) this.pos.copy(this.target);
@@ -206,6 +215,7 @@ export class RemoteAvatar implements Target {
       this.tag.visible = true;
       this.group.visible = true;
     }
+    if (this.concealed) this.group.visible = false;
     if (this.flash > 0) {
       this.flash = Math.max(0, this.flash - dt * 7);
       for (const m of this.mats) m.emissive.setRGB(this.flash, this.flash, this.flash);

@@ -25,8 +25,8 @@ const SIZE: Record<LootKind, { base: number; name: string; r: number }> = {
 /** [x, y, z] in cm, kind, extra risk bonus */
 const SPOTS: [number, number, number, LootKind, number][] = [
   // floor: mostly small, tucked away; the open rug pays more
-  [110, 0, -60, 'gem', 0], [-60, 0, -90, 'coins', 0], [10, 0, -95, 'gem', 0], [120, 0, 110, 'coins', 0],
-  [-120, 0, -12, 'duck', 0], [-30, 0.5, 40, 'car', 2], [60, 0, 100, 'gem', 0], [-20, 0.5, -25, 'coins', 1],
+  [110, 0, -60, 'gem', 0], [-60, 0, -90, 'coins', 0], [10, 0, -95, 'gem', 0], [128, 0, 110, 'coins', 0],
+  [-102, 0, -4, 'duck', 0], [-30, 0.5, 40, 'car', 2], [76, 0, 100, 'gem', 0], [-20, 0.5, -25, 'coins', 1],
   // furniture tops
   [75, 47, 40, 'duck', 1], [115, 47, -70, 'gem', 1], [110, 47, -40, 'robot', 1], [75, 47, -10, 'coins', 1],
   [-50, 46.5, -30, 'car', 1], [-85, 45, 108, 'robot', 1], [25, 30, 110, 'coins', 1],

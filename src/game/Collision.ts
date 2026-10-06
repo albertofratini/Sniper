@@ -309,7 +309,8 @@ export class CollisionWorld {
       if (a > tmin) { tmin = a; axis = 2; }
       tmax = Math.min(tmax, Math.max(t1, t2));
       if (tmax < Math.max(tmin, 0) || tmin > best) continue;
-      if (tmin < 0) continue; // inside box: ignore
+      // inside the box (ignore), or NaN from a ray lying exactly in a face plane (0 * Infinity)
+      if (!(tmin >= 0) || !(tmax >= tmin)) continue;
       best = tmin;
       bestBox = b;
       found = true;

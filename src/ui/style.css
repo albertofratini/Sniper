@@ -377,3 +377,45 @@ body.is-touch #btn-flash { right: calc(244px + var(--sar)); bottom: calc(200px +
 .big-btn.bots { background: linear-gradient(180deg, #8fd0ff, #3f7fd9); box-shadow: 0 6px 0 #234f94, 0 10px 16px rgba(0,0,0,.35); }
 .chip-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
 #bot-modes { display: grid; gap: 8px; }
+
+/* ---------- Hidden Troopers ---------- */
+#btn-steal { display: none; width: 76px; height: 76px; right: calc(150px + var(--sar)); bottom: calc(112px + var(--sab)); font-size: 14px; }
+#btn-steal.ready { background: rgba(255, 207, 51, .5); border-color: #fff; }
+#btn-steal.pressed { background: rgba(255, 207, 51, .85); }
+body.hidden-mode #btn-steal { display: flex; }
+body.hidden-mode #btn-reload, body.hidden-mode #btn-melee, body.hidden-mode #btn-swap, body.hidden-mode #btn-crouch,
+body.hidden-mode #btn-aim, body.hidden-mode .tbtn.nade,
+body.hidden-mode .hud-top, body.hidden-mode .hud-topright, body.hidden-mode .hud-bottomleft, body.hidden-mode .hud-bottomright { display: none !important; }
+body.hidden-mode #crosshair { --gap: 3px; }
+#hid-hud { position: absolute; inset: 0; pointer-events: none; }
+.hid-top { position: absolute; top: calc(10px + var(--sat)); left: 50%; transform: translateX(-50%); display: flex; gap: 8px; }
+.hid-chip { background: rgba(20,12,30,.5); border-radius: 14px; padding: 4px 14px 2px; color: #fff; text-align: center; min-width: 92px; }
+.hid-chip small { display: block; font-family: var(--body); font-weight: 900; font-size: 11px; opacity: .8; letter-spacing: .5px; }
+.hid-chip b { font-size: 24px; color: var(--toy-yellow); text-shadow: 0 2px 0 rgba(0,0,0,.4); }
+.hid-danger { position: absolute; top: calc(70px + var(--sat)); left: 50%; transform: translateX(-50%); color: #fff; background: rgba(216,53,42,.85);
+  border-radius: 12px; padding: 4px 14px 2px; font-size: 15px; white-space: nowrap; opacity: 0; transition: opacity .3s; }
+.hid-danger.on { opacity: 1; animation: hid-pulse 1s infinite; }
+@keyframes hid-pulse { 50% { transform: translateX(-50%) scale(1.05); } }
+.hid-board { position: absolute; top: calc(10px + var(--sat)); right: calc(14px + var(--sar)); background: rgba(20,12,30,.45); border-radius: 12px;
+  padding: 6px 10px; color: #fff; font-family: var(--body); font-weight: 900; font-size: 13px; min-width: 130px; }
+.hid-board div { display: flex; justify-content: space-between; gap: 12px; }
+.hid-board div.me { color: var(--toy-yellow); }
+.hid-board div.out { opacity: .45; text-decoration: line-through; }
+.hid-warn { position: absolute; top: 18%; left: 0; right: 0; text-align: center; font-size: 40px; color: #fff; opacity: 0;
+  text-shadow: 0 4px 0 rgba(0,0,0,.35), 0 0 24px rgba(255,60,40,.8); transition: opacity .3s; }
+.hid-warn.on { opacity: 1; }
+.hid-prompt { position: absolute; left: 50%; top: calc(50% + 34px); transform: translateX(-50%); display: flex; align-items: center; gap: 8px;
+  color: #fff; font-size: 17px; text-shadow: 0 2px 0 rgba(0,0,0,.5); white-space: nowrap; opacity: 0; transition: opacity .15s; }
+.hid-prompt.on { opacity: 1; }
+.hid-prompt svg { width: 38px; height: 38px; transform: rotate(-90deg); }
+.hid-prompt circle { fill: none; stroke-width: 5; }
+.hid-prompt circle.bg { stroke: rgba(0,0,0,.35); }
+.hid-prompt circle.fg { stroke: var(--toy-yellow); stroke-dasharray: 119.4; stroke-dashoffset: 119.4; stroke-linecap: round; }
+.hid-feed { position: absolute; left: calc(14px + var(--sal)); top: calc(70px + var(--sat)); color: #fff; font-family: var(--body); font-weight: 900;
+  font-size: 13px; text-shadow: 0 1px 2px rgba(0,0,0,.7); display: flex; flex-direction: column; gap: 3px; }
+.hid-cd { position: absolute; left: 50%; bottom: calc(18px + var(--sab)); transform: translateX(-50%); color: #fff; opacity: .75; font-size: 14px;
+  text-shadow: 0 2px 0 rgba(0,0,0,.5); white-space: nowrap; }
+body.is-touch .hid-board { top: calc(64px + var(--sat)); font-size: 11px; min-width: 110px; }
+body.is-touch .hid-feed { top: calc(64px + var(--sat)); left: calc(72px + var(--sal)); font-size: 11px; }
+@media (max-width: 700px) { .hid-chip { min-width: 70px; padding: 3px 8px 1px; } .hid-chip b { font-size: 18px; } .hid-warn { font-size: 28px; } }
+body.is-touch #btn-steal { width: 66px; height: 66px; right: calc(118px + var(--sar)); bottom: calc(164px + var(--sab)); font-size: 12px; }

@@ -30,31 +30,32 @@ function at(g: THREE.BufferGeometry, x: number, y: number, z: number, rx = 0, ry
 }
 
 function bodyGeo() {
+  // low-poly on purpose: the crowd is up to ~60 soldiers
   const parts = [
-    paint(at(rbox(0.95, 0.12, 0.75, 0.05), 0, 0.06, 0), RED),
-    paint(at(new THREE.CapsuleGeometry(0.13, 0.5, 4, 8), -0.14, 0.45, 0.05, 0.15), RED),
-    paint(at(new THREE.CapsuleGeometry(0.13, 0.5, 4, 8), 0.14, 0.42, -0.1, -0.25), RED),
-    paint(at(rbox(0.5, 0.58, 0.32, 0.1), 0, 1.0, 0), RED),
-    paint(at(new THREE.TorusGeometry(0.22, 0.04, 6, 14), 0, 0.76, 0, Math.PI / 2), RED),
-    paint(at(rbox(0.36, 0.4, 0.18, 0.06), 0, 1.05, -0.24), RED),
-    paint(at(new THREE.SphereGeometry(0.19, 12, 10), 0, 1.5, 0.02), RED),
-    paint(at(new THREE.SphereGeometry(0.25, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), 0, 1.56, 0), RED),
-    paint(at(new THREE.CylinderGeometry(0.3, 0.3, 0.04, 16), 0, 1.56, 0), RED),
-    paint(at(new THREE.SphereGeometry(0.03, 6, 4), -0.07, 1.5, 0.18), DARK),
-    paint(at(new THREE.SphereGeometry(0.03, 6, 4), 0.07, 1.5, 0.18), DARK),
+    paint(at(rbox(0.95, 0.12, 0.75, 0.05, 1), 0, 0.06, 0), RED),
+    paint(at(new THREE.CapsuleGeometry(0.13, 0.5, 2, 6), -0.14, 0.45, 0.05, 0.15), RED),
+    paint(at(new THREE.CapsuleGeometry(0.13, 0.5, 2, 6), 0.14, 0.42, -0.1, -0.25), RED),
+    paint(at(rbox(0.5, 0.58, 0.32, 0.1, 1), 0, 1.0, 0), RED),
+    paint(at(new THREE.TorusGeometry(0.22, 0.04, 4, 10), 0, 0.76, 0, Math.PI / 2), RED),
+    paint(at(rbox(0.36, 0.4, 0.18, 0.06, 1), 0, 1.05, -0.24), RED),
+    paint(at(new THREE.SphereGeometry(0.19, 10, 7), 0, 1.5, 0.02), RED),
+    paint(at(new THREE.SphereGeometry(0.25, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2), 0, 1.56, 0), RED),
+    paint(at(new THREE.CylinderGeometry(0.3, 0.3, 0.04, 12), 0, 1.56, 0), RED),
+    paint(at(new THREE.SphereGeometry(0.03, 4, 3), -0.07, 1.5, 0.18), DARK),
+    paint(at(new THREE.SphereGeometry(0.03, 4, 3), 0.07, 1.5, 0.18), DARK),
   ];
   return mergeGeometries(parts)!;
 }
 /** arm hanging from its shoulder pivot (origin) */
 function armGeo() {
-  return mergeGeometries([paint(at(new THREE.CapsuleGeometry(0.075, 0.34, 4, 8), 0, -0.24, 0), RED), paint(at(new THREE.SphereGeometry(0.085, 8, 6), 0, -0.46, 0.02), RED)])!;
+  return mergeGeometries([paint(at(new THREE.CapsuleGeometry(0.075, 0.34, 2, 6), 0, -0.24, 0), RED), paint(at(new THREE.SphereGeometry(0.085, 6, 4), 0, -0.46, 0.02), RED)])!;
 }
 /** toy pistol held in the hand at the end of the arm (origin = shoulder) */
 function pistolGeo() {
   return mergeGeometries([
-    paint(at(rbox(0.07, 0.11, 0.3, 0.02), 0, -0.5, 0.14), GREY),
-    paint(at(rbox(0.06, 0.15, 0.07, 0.02), 0, -0.6, 0.02, 0.3), GREY),
-    paint(at(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 10), 0, -0.48, 0.3, Math.PI / 2), ORANGE),
+    paint(at(rbox(0.07, 0.11, 0.3, 0.02, 1), 0, -0.5, 0.14), GREY),
+    paint(at(rbox(0.06, 0.15, 0.07, 0.02, 1), 0, -0.6, 0.02, 0.3), GREY),
+    paint(at(new THREE.CylinderGeometry(0.03, 0.03, 0.04, 6), 0, -0.48, 0.3, Math.PI / 2), ORANGE),
   ])!;
 }
 

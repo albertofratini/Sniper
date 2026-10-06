@@ -23,6 +23,9 @@ export class Input {
   aimRelease = false;
   throwFrag = false;
   throwFlash = false;
+  /** held: steal (Hidden Troopers) */
+  steal = false;
+  touchSteal = false;
   private mouseAim = false;
   private touchAim = false;
 
@@ -151,6 +154,7 @@ export class Input {
     this.crouch = k.has('KeyC') || k.has('ControlLeft') || this.touchCrouch;
     if (this.isTouch) this.fire = this.touchFire;
     this.aim = this.mouseAim || this.touchAim;
+    this.steal = k.has('KeyE') || this.touchSteal;
   }
 
   /** Clear one-shot actions after the frame consumed them. */
@@ -174,6 +178,8 @@ export class Input {
     this.touchCrouch = false;
     this.touchAim = false;
     this.mouseAim = false;
+    this.touchSteal = false;
+    this.steal = false;
     this.touchMove.active = false;
     this.endFrame();
   }
