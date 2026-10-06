@@ -252,6 +252,7 @@ export function makeKit(b: Builder, world: CollisionWorld) {
    */
   const vladder = (fx: number, fz: number, nx: number, nz: number, w: number, y0: number, y1: number, cols: number[], rope = false) => {
     const tx = -nz, tz = nx;
+    w *= 0.6; // slim toy ladder: a bit wider than a soldier
     const off = 0.9; // stands just proud of the face
     const top = y1 + (rope ? 0.2 : 2.6);
     const P = (lat: number, out: number): [number, number] => [fx + tx * lat - nx * out, fz + tz * lat - nz * out];
@@ -260,16 +261,17 @@ export function makeKit(b: Builder, world: CollisionWorld) {
       const [x, z] = P((s * w) / 2, off);
       if (rope) b.part(new THREE.CylinderGeometry(0.28, 0.28, top - y0, 6), 'fabric', 0xe8dcc0, [x, (y0 + top) / 2, z], [0, 0, 0], { ao: 0 });
       else {
-        const hx = Math.abs(tx) * 0.55 + Math.abs(nx) * 0.55, hz = Math.abs(tz) * 0.55 + Math.abs(nz) * 0.55;
+        const hx = Math.abs(tx) * 0.45 + Math.abs(nx) * 0.5, hz = Math.abs(tz) * 0.45 + Math.abs(nz) * 0.5;
         box('glossy', railCol, x - hx, x + hx, y0, top, z - hz, z + hz, 0.3, { ao: 0.2 });
       }
     }
-    const n = Math.max(2, Math.floor((y1 - y0) / 3));
+    // rungs every ~1.6 cm (about half a soldier's height)
+    const n = Math.max(2, Math.floor((y1 - y0) / 1.6));
     for (let i = 1; i <= n; i++) {
       const y = y0 + ((y1 - y0) * i) / (n + 0.4);
       const [x, z] = P(0, off);
-      const hx = Math.abs(tx) * (w / 2) + Math.abs(nx) * 0.4, hz = Math.abs(tz) * (w / 2) + Math.abs(nz) * 0.4;
-      box(rope ? 'wood' : 'glossy', cols[1 + (i % (cols.length - 1))], x - hx, x + hx, y - 0.35, y + 0.35, z - hz, z + hz, 0.25, { ao: 0 });
+      const hx = Math.abs(tx) * (w / 2) + Math.abs(nx) * 0.32, hz = Math.abs(tz) * (w / 2) + Math.abs(nz) * 0.32;
+      box(rope ? 'wood' : 'glossy', cols[1 + (i % (cols.length - 1))], x - hx, x + hx, y - 0.25, y + 0.25, z - hz, z + hz, 0.2, { ao: 0 });
     }
     const L: Ladder = { id: world.ladders.length, x: fx * CM, z: fz * CM, nx, nz, halfW: (w / 2) * CM, y0: y0 * CM, y1: y1 * CM };
     world.ladders.push(L);

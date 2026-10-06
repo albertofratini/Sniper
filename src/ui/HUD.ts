@@ -221,11 +221,12 @@ export class HUD {
   }
 
   killFeed(items: { killer: string; victim: string; weapon: string; t: number }[]) {
-    const el = this.overlay('killfeed', 'position:absolute;left:calc(14px + var(--sal));top:calc(110px + var(--sat));display:flex;flex-direction:column;gap:4px;font-family:var(--body);font-weight:900;font-size:13px');
+    // compact: a few small lines in the corner, never a big block over the action
+    const el = this.overlay('killfeed', 'position:absolute;left:calc(12px + var(--sal));top:calc(104px + var(--sat));display:flex;flex-direction:column;align-items:flex-start;gap:2px;font-family:var(--body);font-weight:800;font-size:10px;line-height:1.25;opacity:.85;max-width:38vw');
     const esc = (x: string) => x.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
     el.innerHTML = items
-      .slice(-4)
-      .map((k) => `<div class="kf" style="background:rgba(20,12,30,.55);padding:3px 10px;border-radius:8px">${esc(k.killer)} <span style="color:#ffcf33">[${esc(k.weapon)}]</span> ${esc(k.victim)}</div>`)
+      .slice(-3)
+      .map((k) => `<div class="kf" style="background:rgba(20,12,30,.45);padding:1px 6px;border-radius:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${esc(k.killer)} <span style="color:#ffcf33;font-size:8px">${esc(k.weapon)}</span> ${esc(k.victim)}</div>`)
       .join('');
     clearTimeout(this.feedTimer);
     this.feedTimer = window.setTimeout(() => (el.innerHTML = ''), 6000);

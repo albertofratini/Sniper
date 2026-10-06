@@ -70,13 +70,13 @@ export function tryGrab(world: CollisionWorld, c: Climber, moveY: number, fwdX: 
   if (st.active || st.regrab > 0) return false;
   for (const l of world.ladders) {
     const { along, lateral } = local(l, c.pos);
-    if (Math.abs(lateral) > l.halfW) continue;
+    if (Math.abs(lateral) > l.halfW + 0.35) continue;
     const facing = fwdX * l.nx + fwdZ * l.nz;
     // from below: in front of the ladder, pushing forward while facing it
     if (moveY > 0.3 && facing > 0.35 && along < 0.15 && along > -(c.radius + 1.0) && c.pos.y >= l.y0 - 0.6 && c.pos.y < l.y1 - 0.4) {
       st.ladder = l;
       st.lastTop = null;
-      ladderSpot(l, c.radius, Math.max(-l.halfW + 0.2, Math.min(l.halfW - 0.2, lateral)), c.pos, c.pos.y);
+      ladderSpot(l, c.radius, Math.max(-l.halfW * 0.5, Math.min(l.halfW * 0.5, lateral)), c.pos, c.pos.y);
       c.vel.set(0, 0, 0);
       return true;
     }
@@ -84,7 +84,7 @@ export function tryGrab(world: CollisionWorld, c: Climber, moveY: number, fwdX: 
     if (grounded && moveY < -0.3 && facing > 0.35 && along > -0.2 && along < c.radius + 1.0 && Math.abs(c.pos.y - l.y1) < 0.35) {
       st.ladder = l;
       st.lastTop = null;
-      ladderSpot(l, c.radius, Math.max(-l.halfW + 0.2, Math.min(l.halfW - 0.2, lateral)), c.pos, l.y1 - c.height * 0.75);
+      ladderSpot(l, c.radius, Math.max(-l.halfW * 0.5, Math.min(l.halfW * 0.5, lateral)), c.pos, l.y1 - c.height * 0.75);
       c.vel.set(0, 0, 0);
       return true;
     }

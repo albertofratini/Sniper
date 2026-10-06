@@ -97,7 +97,7 @@ export class BotManager {
     const pl = this.game.player;
     const list: BotTarget[] = [];
     const me = this.session.self;
-    if (!teams || me.team !== b.team) list.push({ id: me.id, pos: pl.pos, vel: pl.vel, height: pl.height, alive: pl.alive && this.game.inMatch, team: me.team });
+    if (!teams || me.team !== b.team) list.push({ id: me.id, pos: pl.pos, vel: pl.vel, height: pl.height, alive: pl.alive && this.game.inMatch, team: me.team, human: true });
     for (const o of this.bots) if (o !== b && (!teams || o.team !== b.team)) list.push(o as unknown as BotTarget);
     return list;
   }

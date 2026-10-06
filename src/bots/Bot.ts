@@ -38,6 +38,8 @@ export interface BotTarget {
   height: number;
   alive: boolean;
   team: number;
+  /** the real player: bots give them a fair share of attention instead of only fighting each other */
+  human?: boolean;
 }
 
 export interface BotWorld {
@@ -195,21 +197,30 @@ export class Bot {
     const eye = this.eye.clone();
     let best: BotTarget | null = null, bd = Infinity;
     const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+    // targets are compared by id: the human's entry is rebuilt every frame
+    const cur = this.target?.id;
+    let curSeen: BotTarget | null = null;
     for (const t of w.enemiesOf(this)) {
       if (!t.alive) continue;
       v2.set(t.pos.x, t.pos.y + t.height * 0.75, t.pos.z);
       const d = v2.distanceTo(eye);
       if (d > 140) continue;
       const dx = (v2.x - eye.x) / d, dz = (v2.z - eye.z) / d;
-      const inCone = dx * fx + dz * fz > Math.cos(sk.fov) || d < 4 || t === this.target;
+      const inCone = dx * fx + dz * fz > Math.cos(sk.fov) || d < 4 || t.id === cur;
       if (!inCone) continue;
       if (!w.world.lineOfSight(eye, v2)) continue;
-      // prefer close and already-tracked targets
-      const score = d - (t === this.target ? 15 : 0);
+      if (t.id === cur) curSeen = t;
+      // pick like a person would: whoever is closest, whoever is shooting at me, and never forget the human
+      const score = d - (t.human ? 14 : 0) - (t.id === this.lastHitBy && this.sinceHurt < 3 ? 12 : 0);
       if (score < bd) { bd = score; best = t; }
     }
+    // stay on one fight at a time: keep the current target while it's alive and only briefly out of sight
+    if (this.target && this.target.alive) {
+      if (curSeen) best = curSeen;
+      else if (this.lostT < 1.2) best = null; // just ducked out of view: keep chasing them, don't switch
+    }
     if (best) {
-      if (best !== this.target) {
+      if (best.id !== cur) {
         // new contact: reaction delay and a fresh, larger aim error
         this.target = best;
         this.seenT = -sk.reaction * (0.75 + Math.random() * 0.5);
@@ -218,11 +229,12 @@ export class Bot {
         this.errYaw = (Math.random() - 0.5) * 2 * e;
         this.errPitch = (Math.random() - 0.5) * e;
       }
+      this.target = best; // same target, fresh entry
       this.lostT = 0;
       this.lastSeen.copy(best.pos);
     } else if (this.target) {
       this.lostT += 0.15;
-      if (this.lostT > 2.5 || !this.target.alive) this.target = null;
+      if (this.lostT > 3 || !this.target.alive) this.target = null;
     }
     // where to go
     const lowHealth = this.health < 35 && this.target !== null;
@@ -237,7 +249,13 @@ export class Bot {
       // roam: a random spot anywhere on the map (high and low), or toward the nearest enemy
       this.roamT = 30;
       const enemies = w.enemiesOf(this).filter((t) => t.alive);
-      if (enemies.length && Math.random() < 0.2 + 0.3 * sk.aggression) {
+      const human = enemies.find((t) => t.human);
+      // like players drawn to the fight, idle bots often go looking for you (re-checked every few seconds)
+      if (human && Math.random() < 0.3 + 0.3 * sk.aggression) {
+        this.setGoal(human.pos, 'roam', w);
+        this.roamT = 6 + Math.random() * 4;
+      }
+      else if (enemies.length && Math.random() < 0.2 + 0.3 * sk.aggression) {
         const e = enemies.sort((a, b) => a.pos.distanceTo(this.pos) - b.pos.distanceTo(this.pos))[0];
         this.setGoal(e.pos, 'roam', w);
       } else this.setGoal(w.pois[Math.floor(Math.random() * w.pois.length)], 'roam', w);
@@ -327,7 +345,7 @@ export class Bot {
       return;
     }
     const tol = 0.06 + Math.atan2(0.5, dist);
-    if (off < tol && this.cooldown <= 0 && dist < def.range * 0.8) {
+    if (off < tol && this.cooldown <= 0 && dist < def.range * 0.8 && this.lostT === 0) {
       // semi-auto weapons and the sniper take a moment between shots
       this.cooldown = def.rate * (def.sniper ? 1.25 : def.auto ? 1.05 : 1.15) + (def.pellets > 1 ? 0.1 : 0);
       am.mag--;
@@ -393,9 +411,9 @@ export class Bot {
       const ideal = def.pellets > 1 ? 7 : def.sniper ? 45 : 20 - 8 * sk.aggression;
       this.strafeT -= dt;
       if (this.strafeT <= 0) {
-        this.strafeT = 0.5 + Math.random() * (1.4 - sk.movement * 0.6);
+        this.strafeT = 0.9 + Math.random() * (1.6 - sk.movement * 0.5);
         this.strafeDir = Math.random() < 0.5 ? -1 : 1;
-        this.jumpWant = Math.random() < 0.18 * sk.movement;
+        this.jumpWant = Math.random() < 0.08 * sk.movement;
       }
       const to = v1.set(t.pos.x - this.pos.x, 0, t.pos.z - this.pos.z).normalize();
       const side = new THREE.Vector3(to.z * this.strafeDir, 0, -to.x * this.strafeDir);
