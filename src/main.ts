@@ -3,15 +3,17 @@ import { Game } from './game/Game';
 import { audio } from './game/Audio';
 import { Session } from './net/Session';
 import { randomRoomCode } from './net/Net';
+import { BotManager, Difficulty } from './bots/BotManager';
 import { MODES, ModeId, TEAM_NAMES } from './game/Modes';
 
 const $ = (id: string) => document.getElementById(id)!;
 const canvas = $('game') as HTMLCanvasElement;
 const playBtn = $('play-btn') as HTMLButtonElement;
 const friendsBtn = $('friends-btn') as HTMLButtonElement;
+const botsBtn = $('bots-btn') as HTMLButtonElement;
 const loading = $('loading');
 
-playBtn.disabled = friendsBtn.disabled = true;
+playBtn.disabled = friendsBtn.disabled = botsBtn.disabled = true;
 
 const store = {
   get(k: string) {
@@ -76,11 +78,11 @@ requestAnimationFrame(() =>
       return;
     }
     loading.textContent = '';
-    playBtn.disabled = friendsBtn.disabled = false;
+    playBtn.disabled = friendsBtn.disabled = botsBtn.disabled = false;
     game.tick();
 
     const show = (id: string, v: boolean) => $(id).classList.toggle('hidden', !v);
-    const screens = ['menu', 'pause', 'end', 'lobby', 'mp-end'];
+    const screens = ['menu', 'pause', 'end', 'lobby', 'mp-end', 'bots'];
     const only = (id: string | null) => screens.forEach((s) => show(s, s === id));
 
     if (!canFullscreen() && isIOS && !standalone) show('ios-hint', true);
@@ -216,6 +218,60 @@ requestAnimationFrame(() =>
       if (session) openRoom(session.room);
     });
 
+    // ------------------------------------------------------------ matches against bots (offline room)
+    let botSession: Session | null = null;
+    const botCfg = { mode: (store.get('tt-bot-mode') as ModeId) || 'ffa', size: 5, diff: (store.get('tt-bot-diff') as Difficulty) || 'normal' };
+    const sizeOpts: Record<string, [number, string][]> = {
+      duel: [[1, '1 BOT']],
+      ffa: [[3, '3 BOTS'], [5, '5 BOTS'], [7, '7 BOTS']],
+      tdm: [[2, '2 V 2'], [3, '3 V 3'], [4, '4 V 4']],
+      hidden: [[3, '3 BOTS'], [5, '5 BOTS'], [7, '7 BOTS']],
+    };
+    function renderBots() {
+      $('bot-modes').querySelectorAll<HTMLElement>('.mode-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === botCfg.mode));
+      const opts = sizeOpts[botCfg.mode] ?? sizeOpts.ffa;
+      if (!opts.some(([n]) => n === botCfg.size)) botCfg.size = opts[Math.min(1, opts.length - 1)][0];
+      $('bot-size-label').textContent = botCfg.mode === 'tdm' ? 'TEAMS' : 'OPPONENTS';
+      const box = $('bot-size');
+      box.innerHTML = '';
+      for (const [n, label] of opts) {
+        const b = document.createElement('button');
+        b.className = 'chip-btn' + (n === botCfg.size ? ' on' : '');
+        b.textContent = label;
+        b.addEventListener('click', () => { botCfg.size = n; renderBots(); });
+        box.appendChild(b);
+      }
+      $('bot-diff').querySelectorAll<HTMLElement>('button').forEach((b) => b.classList.toggle('on', b.dataset.diff === botCfg.diff));
+    }
+    $('bot-modes').querySelectorAll<HTMLElement>('.mode-btn').forEach((b) =>
+      b.addEventListener('click', () => { botCfg.mode = b.dataset.mode as ModeId; store.set('tt-bot-mode', botCfg.mode); renderBots(); }),
+    );
+    $('bot-diff').querySelectorAll<HTMLElement>('button').forEach((b) =>
+      b.addEventListener('click', () => { botCfg.diff = b.dataset.diff as Difficulty; store.set('tt-bot-diff', botCfg.diff); renderBots(); }),
+    );
+    botsBtn.addEventListener('click', () => { audio.init(); renderBots(); only('bots'); });
+    $('bots-back').addEventListener('click', () => only('menu'));
+    function startBotMatch() {
+      botSession?.leave();
+      const s = new Session('BOTS-' + randomRoomCode(), game, nameInput.value);
+      const count = botCfg.mode === 'tdm' ? botCfg.size * 2 - 1 : botCfg.size;
+      s.setMode(botCfg.mode, botCfg.mode === 'tdm' ? botCfg.size : 2);
+      s.bots = new BotManager(game, s, count, botCfg.diff);
+      s.onEnd = () => {
+        const info = s.endInfo!;
+        $('mp-end-title').textContent = info.title;
+        $('mp-end-lines').innerHTML = info.lines.map((l) => `<div>${l.replace(/[&<>]/g, '')}</div>`).join('');
+        only('mp-end');
+      };
+      botSession = s;
+      goFullscreen();
+      s.startMatch();
+    }
+    $('bots-start').addEventListener('click', startBotMatch);
+    (window as unknown as { __startBots: (m: ModeId, n: number, d: Difficulty) => void }).__startBots = (m, n, d) => {
+      botCfg.mode = m; botCfg.size = n; botCfg.diff = d; startBotMatch();
+    };
+
     // ------------------------------------------------------------ game state → screens
     game.onStateChange = (s, info) => {
       show('join-toast', false);
@@ -226,7 +282,13 @@ requestAnimationFrame(() =>
         $('quit-btn').textContent = game.inMatch ? 'LEAVE MATCH' : 'QUIT TO MENU';
       } else if (s === 'menu') {
         game.hud.show(false);
-        if (session) openRoom(session.room);
+        if (botSession) {
+          // a bot match ended (or you left it): back to the main menu
+          const bs = botSession;
+          botSession = null;
+          bs.leave();
+          only('menu');
+        } else if (session) openRoom(session.room);
         else only('menu');
       } else if (s === 'over' && info) {
         only('end');

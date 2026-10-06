@@ -167,7 +167,38 @@ export class LocalTransport extends Base {
   }
 }
 
+/**
+ * Offline transport for matches against bots: no network at all. Messages the
+ * local session sends go to `outbound` (the bot manager); bots talk back with
+ * deliver(), exactly as if they were remote peers.
+ */
+export class LoopbackTransport extends Base {
+  constructor(readonly room: string) {
+    super();
+  }
+  readonly selfId = 'me-' + Math.random().toString(36).slice(2, 8);
+  outbound: (type: string, data: unknown, to?: string) => void = () => {};
+  send(type: string, data: unknown, to?: string) {
+    // async like a real network, so handlers never re-enter each other
+    queueMicrotask(() => this.outbound(type, data, to));
+  }
+  /** a bot "sends" to us */
+  deliver(type: string, data: unknown, from: string) {
+    this.dispatch({ t: type, d: data }, from);
+  }
+  join(id: string) {
+    this.joinCbs.forEach((c) => c(id));
+  }
+  whenReady(cb: () => void) {
+    cb();
+  }
+  leave() {
+    this.outbound = () => {};
+  }
+}
+
 export function createTransport(roomId: string): Transport {
+  if (roomId.startsWith('BOTS')) return new LoopbackTransport(roomId);
   const local = new URLSearchParams(location.search).get('net') === 'local';
   return local ? new LocalTransport(roomId) : new TrysteroTransport(roomId);
 }

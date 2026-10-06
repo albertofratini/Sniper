@@ -1,6 +1,6 @@
 import { SNIPER, MINIGUN } from './Weapons';
 
-export type ModeId = 'ffa' | 'gungame' | 'snipers' | 'tdm' | 'coop';
+export type ModeId = 'ffa' | 'duel' | 'gungame' | 'snipers' | 'tdm' | 'coop' | 'hidden';
 
 export interface ModeDef {
   id: ModeId;
@@ -25,6 +25,11 @@ export const MODES: Record<ModeId, ModeDef> = {
     loadout: [0, 1, 2, 3], frags: 1, flashes: 1, scoreLimit: 20, timeLimit: 480, teams: false,
     pickups: ['health', 'ammo', 'frag', 'flash', 'minigun'],
   },
+  duel: {
+    id: 'duel', name: '1 V 1 DUEL', blurb: 'One on one. First to 10 knockouts.',
+    loadout: [0, 1, 2, 3], frags: 1, flashes: 1, scoreLimit: 10, timeLimit: 420, teams: false,
+    pickups: ['health', 'ammo', 'frag', 'flash', 'minigun'],
+  },
   gungame: {
     id: 'gungame', name: 'GUN GAME', blurb: 'Every knockout gives you a new gun. 15 to win.',
     loadout: [0], frags: 0, flashes: 1, scoreLimit: 15, timeLimit: 600, teams: false,
@@ -39,6 +44,11 @@ export const MODES: Record<ModeId, ModeDef> = {
     id: 'tdm', name: 'TEAM BATTLE', blurb: 'Green Squad vs Tan Squad. First team to 30.',
     loadout: [0, 1, 2, 3], frags: 1, flashes: 1, scoreLimit: 30, timeLimit: 600, teams: true,
     pickups: ['health', 'ammo', 'frag', 'flash', 'minigun'],
+  },
+  hidden: {
+    id: 'hidden', name: 'HIDDEN TROOPERS', blurb: 'Blend in with the toy army, steal toys, unmask the others. Last one standing wins.',
+    loadout: [], frags: 0, flashes: 0, scoreLimit: 0, timeLimit: 0, teams: false,
+    pickups: [],
   },
   coop: {
     id: 'coop', name: 'CO-OP SURVIVAL', blurb: 'Team up against all 5 waves and the Wind-Up King.',

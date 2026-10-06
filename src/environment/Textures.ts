@@ -66,7 +66,7 @@ export function plasticDetail(): THREE.Texture {
   ctx.lineCap = 'round';
   for (let i = 0; i < 40; i++) {
     const x = r() * S, y = r() * S, a = r() * Math.PI * 2, l = 6 + r() * 30;
-    ctx.strokeStyle = r() > 0.5 ? 'rgba(255,255,255,0.7)' : 'rgba(170,170,170,0.35)';
+    ctx.strokeStyle = r() > 0.5 ? 'rgba(255,255,255,0.6)' : 'rgba(185,185,185,0.2)';
     ctx.lineWidth = 0.6 + r() * 0.8;
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -96,7 +96,7 @@ export function plasticRough(): THREE.Texture {
     }
   }
   for (let i = 0; i < 50; i++) {
-    ctx.strokeStyle = `rgba(230,230,230,${0.2 + r() * 0.4})`;
+    ctx.strokeStyle = `rgba(200,200,200,${0.12 + r() * 0.22})`;
     ctx.lineWidth = 0.5 + r();
     const x = r() * S, y = r() * S, a = r() * 6.28, l = 5 + r() * 25;
     ctx.beginPath();

@@ -372,3 +372,8 @@ body.is-touch #btn-crouch { width: 46px; height: 46px; right: calc(192px + var(-
 body.is-touch .tbtn.nade { width: 44px; height: 44px; font-size: 18px; }
 body.is-touch #btn-frag { right: calc(192px + var(--sar)); bottom: calc(172px + var(--sab)); }
 body.is-touch #btn-flash { right: calc(244px + var(--sar)); bottom: calc(200px + var(--sab)); }
+
+/* ---------- Bots setup ---------- */
+.big-btn.bots { background: linear-gradient(180deg, #8fd0ff, #3f7fd9); box-shadow: 0 6px 0 #234f94, 0 10px 16px rgba(0,0,0,.35); }
+.chip-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
+#bot-modes { display: grid; gap: 8px; }

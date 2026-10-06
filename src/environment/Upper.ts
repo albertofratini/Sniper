@@ -22,7 +22,7 @@ export interface PickupSpot { pos: THREE.Vector3; kind: PickupKind; respawn: num
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x * CM, y * CM, z * CM);
 
 export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[] {
-  const { add, box, solid, wall, parapet, rail, deck, ramp, glowDot, slopeRail } = makeKit(b, world);
+  const { add, box, solid, wall, parapet, rail, deck, ramp, glowDot, slopeRail, vladder } = makeKit(b, world);
 
   const KEEP = [0xe8453c, 0x3f7fd9, 0xffcf33, 0xf4f1ea, 0x5bbf6a];
   const INNER = [0xf4f1ea, 0xffcf33, 0x8fc6ef];
@@ -76,7 +76,7 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     glowDot(116.6, 53, -16);
     glowDot(75, 53, -56.6);
     // back ladder from the bed up to the roof
-    ramp({ axis: 'z', u0: 0, u1: 11, h0: RT, h1: Y0, c0: 108, c1: 116, ladder: true, thick: 1.2, cols: [0xe8453c, 0xffcf33], rails: [true, true], railH: 2.6, railCol: 0xf4f1ea });
+    vladder(112, 0, 0, -1, 8, Y0, RT, [0xf4f1ea, 0xe8453c, 0xffcf33]);
 
     // ---- watch tower (NW of the keep): guard room at bed level, deck at 74
     const T0 = 47, TT = 74;
@@ -98,10 +98,10 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     rail(68.05, 69.25, TT - 1.5, TT + 3, -82, -74, 0xe8453c);
 
     // ---- ladder from the tower to the window-sill sniper ledge (90)
-    ramp({ axis: 'z', u0: -91, u1: -80, h0: 90, h1: TT, c0: 48, c1: 56, ladder: true, thick: 1.2, cols: [0x3f7fd9, 0xf4f1ea], rails: [true, true], railH: 2.6, railCol: 0xffcf33 });
-    deck(46, 58, -111, -91, 90, 0xe9c27a);
-    rail(44.8, 46, 88.5, 92.6, -111, -91, 0x3f7fd9);
-    rail(58, 59.2, 88.5, 92.6, -111, -91, 0x3f7fd9);
+    deck(46, 58, -111, -82, 90, 0xe9c27a);
+    rail(44.8, 46, 88.5, 92.6, -111, -82, 0x3f7fd9);
+    rail(58, 59.2, 88.5, 92.6, -111, -82, 0x3f7fd9);
+    vladder(52, -82, 0, -1, 8, TT, 90, [0xffcf33, 0x3f7fd9, 0xf4f1ea]);
 
     // ---- sky bridge: tower (74) -> desk (74), with a block pillar under it
     deck(-12, 40, -76, -66, TT, 0xe9c27a);
@@ -138,7 +138,9 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     // big atlas leaning from the chair seat (46.5) up to the desk
     ramp({ axis: 'z', u0: -58, u1: -24, h0: D, h1: 46.5, c0: -64, c1: -54, thick: 2, kind: 'painted', cols: [0x2fb3b3, 0x2a8f8f], segs: 2, rails: [true, true], railCol: 0xffcf33 });
     // plastic ladder from the floor up to the chair seat
-    ramp({ axis: 'x', u0: -110, u1: -79, h0: 0, h1: 46.5, c0: -46, c1: -38, ladder: true, thick: 1.2, cols: [0xff4d3d, 0xffcf33, 0x3fa9ff], rails: [true, true], railH: 2.6, railCol: 0xf4f1ea });
+    vladder(-79, -42, 1, 0, 8, 0, 46.5, [0xf4f1ea, 0xff4d3d, 0xffcf33, 0x3fa9ff]);
+    // floor -> desk, and floor -> bookshelf balcony
+    vladder(-32, -58, 0, -1, 7, 0, D, [0xf4f1ea, 0x5bbf6a, 0xffcf33]);
   }
 
   // ======================================================================= BOOKSHELF BALCONY (83)
@@ -149,6 +151,7 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     deck(-104, -95, -32, 80, Y, 0xe9c27a);
     rail(-94.95, -93.75, Y - 1.5, Y + 3, -32, 8, 0x3f7fd9);
     rail(-94.95, -93.75, Y - 1.5, Y + 3, 16, 80, 0x3f7fd9);
+    vladder(-95, 12, -1, 0, 7, 0.5, Y, [0xf4f1ea, 0x3f7fd9, 0xffcf33]);
     rail(-105.25, -104.05, Y - 1.5, Y + 3, -32, -30, 0x3f7fd9);
     rail(-105.25, -104.05, Y - 1.5, Y + 3, 50, 80, 0x3f7fd9);
     // pencil stilts
@@ -185,6 +188,7 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     rail(-105.5, -104.5, 123, 125.6, 36, 47, 0xe35d4f);
     // crow's nest: book battlement along the front edge
     parapet(-106, -104.5, -27, 47, 160, [0xe35d4f, 0x3f7fd9, 0xf2c84b], [[36, 47]]);
+    parapet(-132.5, -106, -30, -28.5, 160, [0xf2c84b, 0xe35d4f, 0x3f7fd9]);
   }
 
   // ======================================================================= TOY-CHEST TOWER (83)
@@ -201,7 +205,9 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
   }
 
   // ======================================================================= CRATE -> BED LADDER, BED SLIDE
-  ramp({ axis: 'z', u0: 84.5, u1: 95.5, h0: 47, h1: 30, c0: 32, c1: 40, ladder: true, thick: 1.2, cols: [0x5bbf6a, 0xf4f1ea], rails: [true, true], railTo: 90, railH: 2.6, railCol: 0xf4f1ea });
+  vladder(36, 84.5, 0, -1, 8, 30, 47, [0xf4f1ea, 0x5bbf6a, 0xffcf33]);
+  // floor -> bed, up the side of the quilt
+  vladder(27.5, 25, 1, 0, 8, 0, 47, [0xf4f1ea, 0xff8a1f, 0x3f7fd9]);
 
   // ======================================================================= EDGE SAFETY
   // Low toy barriers along drops you could run off by accident. All of them are
@@ -210,13 +216,14 @@ export function buildUpperLevels(b: Builder, world: CollisionWorld): PickupSpot[
     // picket fence along the open bed edges
     const picket = (x0: number, x1: number, z0: number, z1: number, gaps: [number, number][] = []) => parapet(x0, x1, z0, z1, 47, [0xf4f1ea, 0xffcf33], gaps, 2.4);
     picket(29.2, 30.4, -67, -17.5);
-    picket(29.2, 30.4, 1.5, 82.2);
+    picket(29.2, 30.4, 1.5, 82.2, [[20.5, 29.5]]);
     picket(29.2, 130, 82.2, 83.4, [[32, 40], [95, 105]]);
     // pencil fence along the desk edges (open at the ramps, the atlas, the tube and the sky bridge)
     const pencil = (x0: number, x1: number, z0: number, z1: number) => rail(x0, x1, 74, 76.2, z0, z1, 0xffcf33);
     pencil(-134, -104, -59.2, -58);
     pencil(-95, -64, -59.2, -58);
-    pencil(-54, -26.5, -59.2, -58);
+    pencil(-54, -36.5, -59.2, -58);
+    pencil(-27.5, -26.5, -59.2, -58);
     pencil(-13.2, -12, -120, -76.5);
     // under the desk-to-hub tube mouth
     pencil(-26.5, -12, -59.2, -58);

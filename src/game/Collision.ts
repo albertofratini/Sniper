@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Ladder } from './Ladders';
 
 export interface Box {
   minX: number; minY: number; minZ: number;
@@ -43,6 +44,7 @@ export function rampSurface(r: Ramp, x: number, z: number) {
 export class CollisionWorld {
   boxes: Box[] = [];
   ramps: Ramp[] = [];
+  ladders: Ladder[] = [];
   private cell = 8;
   private hash = new Map<number, Box[]>();
 
@@ -513,10 +515,26 @@ export class NavGrid {
 
   /** Reverse BFS from the target positions (players) over walkable/climbable links. */
   update(tx: number, tz: number, extra: { x: number; z: number; y?: number }[] = [], ty = 0) {
-    const { w, h, dist, queue } = this;
+    this.bfs([{ x: tx, z: tz, y: ty }, ...extra], this.dist, false);
+  }
+
+  /** ladder links between the node at a ladder's foot and the node where you step off at the top */
+  links: { a: number; b: number; ladder: Ladder }[] = [];
+  addLadderLinks(ladders: Ladder[], r = 0.42) {
+    for (const l of ladders) {
+      const fx = l.x - l.nx * (r + 0.4), fz = l.z - l.nz * (r + 0.4);
+      const tx = l.x + l.nx * (r + 0.6), tz = l.z + l.nz * (r + 0.6);
+      const a = this.nodeAt(fx, l.y0 + 0.2, fz, 1), b = this.nodeAt(tx, l.y1 + 0.2, tz, 1);
+      if (a >= 0 && b >= 0 && Math.abs(this.nodeH[a] - l.y0) < 1.5 && Math.abs(this.nodeH[b] - l.y1) < 1.5) this.links.push({ a, b, ladder: l });
+    }
+  }
+
+  /** Reverse BFS from the targets into `dist` (optionally through ladders). */
+  bfs(targets: { x: number; z: number; y?: number }[], dist: Int32Array, useLinks: boolean) {
+    const { w, h, queue } = this;
     dist.fill(-1);
     let head = 0, tail = 0;
-    for (const t of [{ x: tx, z: tz, y: ty }, ...extra]) {
+    for (const t of targets) {
       const n = this.nodeAt(t.x, t.y ?? 0, t.z, 6);
       if (n >= 0 && dist[n] < 0) { dist[n] = 0; queue[tail++] = n; }
     }
@@ -537,7 +555,60 @@ export class NavGrid {
             queue[tail++] = u;
           }
         }
+      if (useLinks)
+        for (const k of this.links) {
+          const u = k.a === v ? k.b : k.b === v ? k.a : -1;
+          if (u >= 0 && dist[u] < 0) { dist[u] = d + 2; queue[tail++] = u; }
+        }
     }
+  }
+
+  /**
+   * Like steer() but over any distance field. Returns the ladder to climb (or
+   * descend) when that's the way to go, true for a walking direction, false
+   * when there is nothing better nearby.
+   */
+  steerIn(dist: Int32Array, x: number, z: number, y: number, out: THREE.Vector3, useLinks: boolean): boolean | Ladder {
+    const { w, h } = this;
+    const me = this.nodeAt(x, y, z, 1);
+    if (me < 0) return false;
+    const c = this.nodeCell[me];
+    const cx = c % w, cz = (c / w) | 0;
+    let best = dist[me] >= 0 ? dist[me] : 1e9;
+    let bc = -1;
+    let lad: Ladder | null = null;
+    for (let dz = -1; dz <= 1; dz++)
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dz) continue;
+        const nx = cx + dx, nz = cz + dz;
+        if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue;
+        const nc = nz * w + nx;
+        for (let u = this.start[nc]; u < this.start[nc + 1]; u++) {
+          if (dist[u] < 0 || !this.passable(me, u)) continue;
+          if (dx && dz && (!this.hasNear(cz * w + nx, this.nodeH[me]) || !this.hasNear(nz * w + cx, this.nodeH[me]))) continue;
+          const dd = dist[u] + (dx && dz ? 0.4 : 0);
+          if (dd < best) { best = dd; bc = nc; }
+        }
+      }
+    if (useLinks)
+      for (const k of this.links) {
+        const near = (n: number) => n === me || (this.nodeCell[n] !== undefined && Math.abs(this.nodeH[n] - this.nodeH[me]) < 0.6 && Math.abs((this.nodeCell[n] % w) - cx) <= 1 && Math.abs(((this.nodeCell[n] / w) | 0) - cz) <= 1);
+        const other = near(k.a) ? k.b : near(k.b) ? k.a : -1;
+        if (other >= 0 && dist[other] >= 0 && dist[other] + 1 < best) { best = dist[other] + 1; lad = k.ladder; bc = -2; }
+      }
+    if (lad) {
+      out.set(lad.x - x, 0, lad.z - z);
+      const l = out.length();
+      if (l > 1e-4) out.divideScalar(l);
+      return lad;
+    }
+    if (bc < 0) return false;
+    this.centre(bc, this.tv);
+    out.set(this.tv.x - x, 0, this.tv.z - z);
+    const l = out.length();
+    if (l < 1e-4) return false;
+    out.divideScalar(l);
+    return true;
   }
 
   private tv = new THREE.Vector3();

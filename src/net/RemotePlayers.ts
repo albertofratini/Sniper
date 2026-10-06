@@ -13,6 +13,8 @@ export interface PlayerState {
   a: 0 | 1;
   c: 0 | 1;
   h: number;
+  /** reloading (drives the gun tilt other players see) */
+  r?: 0 | 1;
 }
 
 export interface AvatarHit { t: number; mult: number }
@@ -37,6 +39,8 @@ export class RemoteAvatar implements Target {
   hp = 100;
   weapon = 0;
   crouch = false;
+  reloading = false;
+  private reloadK = 0;
   private target = new THREE.Vector3();
   private lastStateAt = 0;
   private anim = 0;
@@ -156,6 +160,7 @@ export class RemoteAvatar implements Target {
     this.pitch = s.pi;
     this.weapon = s.w;
     this.crouch = s.c === 1;
+    this.reloading = s.r === 1;
     this.hp = s.h;
     const wasAlive = this.alive;
     this.alive = s.a === 1;
@@ -181,7 +186,10 @@ export class RemoteAvatar implements Target {
     this.legs[0].rotation.x = moving ? Math.sin(ph) * 0.6 : 0;
     this.legs[1].rotation.x = moving ? -Math.sin(ph) * 0.6 : 0;
     this.body.position.y = moving ? Math.abs(Math.sin(ph)) * 0.06 : 0;
-    this.gun.rotation.x = -this.pitch;
+    // reloading: gun dips and rolls toward the support hand
+    this.reloadK += ((this.reloading ? 1 : 0) - this.reloadK) * Math.min(1, dt * 10);
+    this.gun.rotation.x = -this.pitch + this.reloadK * 0.7;
+    this.gun.rotation.z = this.reloadK * 0.6;
     this.head.rotation.x = -this.pitch * 0.5;
     const crouchK = this.crouch ? 0.65 : 1;
     this.body.scale.y += (crouchK - this.body.scale.y) * Math.min(1, dt * 12);

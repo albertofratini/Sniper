@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Transport, createTransport } from './Net';
+import { Transport, createTransport, LoopbackTransport } from './Net';
 import { RemoteAvatar, PlayerState } from './RemotePlayers';
 import { MODES, ModeId, GUN_LADDER, TEAM_COLORS, FFA_COLORS, TEAM_NAMES } from '../game/Modes';
 import { WEAPONS } from '../game/Weapons';
@@ -55,6 +55,8 @@ export class Session {
   private lastHitWeapon = 0;
   private puppetSeen = new Map<number, number>();
   private wasLeader = false;
+  /** extra per-frame simulation living in this room (offline bots) */
+  bots: { update(dt: number): void } | null = null;
   onChange: () => void = () => {};
   onEnd: () => void = () => {};
   /** last co-op snapshot info for non-leader HUD */
@@ -73,6 +75,11 @@ export class Session {
     });
     this.t.onLeave((id) => this.removePeer(id));
     this.bind();
+  }
+
+  /** an offline room (just you and bots): no network, and it can be paused */
+  get offline() {
+    return this.t instanceof LoopbackTransport;
   }
 
   // ------------------------------------------------------------------ roster
@@ -420,7 +427,7 @@ export class Session {
     const pl = this.game.player;
     const s: PlayerState = {
       p: arr(pl.pos), v: arr(pl.vel), y: +pl.yaw.toFixed(3), pi: +pl.pitch.toFixed(3),
-      w: this.game.weapons.current, a: pl.alive ? 1 : 0, c: pl.crouching ? 1 : 0, h: Math.round(pl.health),
+      w: this.game.weapons.current, a: pl.alive ? 1 : 0, c: pl.crouching ? 1 : 0, h: Math.round(pl.health), r: this.game.weapons.state === 'reload' ? 1 : 0,
     };
     this.t.send('st', s);
   }
@@ -540,6 +547,7 @@ export class Session {
       this.sendState();
     }
     for (const av of this.avatars.values()) av.update(dt, now);
+    this.bots?.update(dt);
     if (this.match?.mode === 'coop' && this.isLeader) {
       this.snapT -= dt;
       if (this.snapT <= 0) {

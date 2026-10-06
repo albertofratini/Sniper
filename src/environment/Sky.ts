@@ -18,7 +18,7 @@ import type { PickupSpot } from './Upper';
  *   Tubes            desk (74) -> hub (135) and lookout (151) -> crow's nest (160)
  */
 export function buildSkyLevels(b: Builder, world: CollisionWorld): PickupSpot[] {
-  const { box, solid, parapet, rail, deck, ramp, tube, string, glowDot } = makeKit(b, world);
+  const { box, solid, parapet, rail, deck, ramp, tube, string, glowDot, vladder } = makeKit(b, world);
   const v = (x: number, y: number, z: number) => new THREE.Vector3(x * CM, y * CM, z * CM);
 
   const RED = 0xe8453c, BLUE = 0x3f7fd9, YEL = 0xffcf33, WHITE = 0xf4f1ea, GREEN = 0x5bbf6a, TEAL = 0x2fb3b3, ORANGE = 0xff8a1f;
@@ -38,7 +38,9 @@ export function buildSkyLevels(b: Builder, world: CollisionWorld): PickupSpot[] 
     parapet(-28, -26.5, 8, 52, HUB, HUBPAL, [[24, 38]]);
     parapet(10.5, 12, 8, 52, HUB, HUBPAL, [[14, 22]]);
     parapet(-28, 12, 8, 9.5, HUB, HUBPAL, [[-26.5, -12.5]]);
-    parapet(-28, 12, 50.5, 52, HUB, HUBPAL);
+    parapet(-28, 12, 50.5, 52, HUB, HUBPAL, [[-12, -4]]);
+    // rope ladder hanging from the plate down to the rug: the quick way up
+    vladder(-8, 52, 0, -1, 7, 0.5, HUB, [0xe8dcc0, 0xd64c3f, 0xffcf33], true);
     for (const [x, z] of [[-27, 9], [11, 9], [-27, 51], [11, 51]]) string(x, HUB, z);
 
     // lookout on four block stilts, stairs up from the plate
@@ -47,7 +49,7 @@ export function buildSkyLevels(b: Builder, world: CollisionWorld): PickupSpot[] 
     ramp({ axis: 'z', u0: 14, u1: 36, h0: HUB, h1: LOOK, c0: -12, c1: -4, solid: true, base: HUB, steps: 2, cols: [WHITE, 0xe9e4d8], nosing: RED, rails: [true, true], railCol: RED });
     parapet(-16, 4, 36, 37.5, LOOK, HUBPAL, [[-12, -4]]);
     parapet(2.5, 4, 37.5, 48.5, LOOK, HUBPAL);
-    parapet(-16, 4, 48.5, 50, LOOK, HUBPAL, [[-10, -2]]);
+    parapet(-16, 4, 48.5, 50, LOOK, HUBPAL);
     glowDot(-6, LOOK - 2.4, 43, 0xfff1c4);
   }
 
@@ -181,7 +183,8 @@ export function buildSkyLevels(b: Builder, world: CollisionWorld): PickupSpot[] 
     rail(78, 85.25, TOP, TOP + 2.6, 36.05, 37.25, RC);
     parapet(100.5, 102, 14, 42, TOP, HUBPAL);
     parapet(78, 102, 40.5, 42, TOP, HUBPAL);
-    parapet(78, 102, 14, 15.5, TOP, HUBPAL, [[78, 84]]);
+    // closed on the south side: the last flight arrives heading this way
+    parapet(78, 102, 14, 15.5, TOP, HUBPAL);
     // keep roof (59) -> first landing (56.4)
     ramp({ axis: 'z', u0: 0, u1: 14, h0: 59, h1: B + rx, c0: 96, c1: 102, thick: 1.5, kind: 'wood', cols: [0xe9c27a, 0xdcb075], rails: [true, true], railCol: RC });
   }
@@ -189,12 +192,13 @@ export function buildSkyLevels(b: Builder, world: CollisionWorld): PickupSpot[] 
   // ======================================================================= YELLOW JET (165)
   {
     const J = 165;
-    ramp({ axis: 'z', u0: 50, u1: 60, h0: LOOK, h1: J, c0: -10, c1: -2, ladder: true, thick: 1.2, cols: [RED, WHITE], rails: [true, true], railH: 2.6, railCol: YEL });
+    vladder(-6, 48.5, 0, 1, 7, LOOK, J, [YEL, RED, WHITE]);
     solid('glossy', YEL, -10, -2, J - 8, J, 60, 112, 2);
     solid('glossy', WHITE, -9, -3, J - 7, J - 1, 112, 116, 2);
     for (const z of [100, 104]) box('glossy', 0x24334a, -10.4, -1.6, J - 4, J - 2.2, z, z + 3, 0.4, { ao: 0 });
     solid('glossy', YEL, -45, 35, J - 1.5, J, 84, 98, 0.6);
-    solid('glossy', YEL, -20, 8, J - 1.5, J, 60, 66, 0.5);
+    // tailplane reaches back over the lookout so the ladder can climb to it
+    solid('glossy', YEL, -20, 8, J - 1.5, J, 48.5, 66, 0.5);
     // twin tail fins double as rails at the back
     solid('glossy', RED, -11.2, -10, J - 1.5, J + 7, 60, 68, 0.3);
     solid('glossy', RED, -2, -0.8, J - 1.5, J + 7, 60, 68, 0.3);
@@ -206,8 +210,10 @@ export function buildSkyLevels(b: Builder, world: CollisionWorld): PickupSpot[] 
       rail(-11.2, -10, J - 1.5, J + 2.4, z0, z1, RED);
       rail(-2, -0.8, J - 1.5, J + 2.4, z0, z1, RED);
     }
-    rail(-21.2, -20, J - 1.5, J + 2, 60, 66, RED);
-    rail(8, 9.2, J - 1.5, J + 2, 60, 66, RED);
+    rail(-21.2, -20, J - 1.5, J + 2, 48.5, 66, RED);
+    rail(8, 9.2, J - 1.5, J + 2, 48.5, 66, RED);
+    rail(-20, -10.2, J - 1.5, J + 2, 47.3, 48.5, RED);
+    rail(-1.8, 8, J - 1.5, J + 2, 47.3, 48.5, RED);
     rail(-46.2, -45, J - 1.5, J + 2, 82.8, 99.2, RED);
     rail(35, 36.2, J - 1.5, J + 2, 82.8, 99.2, RED);
     string(-42, J, 91);

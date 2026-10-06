@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CollisionWorld } from './Collision';
 import { Input } from './Input';
 import { audio } from './Audio';
+import { LadderState, climbStep, ladderTick, tryGrab } from './Ladders';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -50,6 +51,12 @@ export class Player {
   private camY = 0;
   onDamage: (amount: number, from?: THREE.Vector3) => void = () => {};
   moveIntent = new THREE.Vector2();
+  /** ladder climbing state */
+  climb = new LadderState();
+  /** true while on a ladder (stepping off the top included) */
+  get onLadder() {
+    return this.climb.active;
+  }
 
   constructor(private world: CollisionWorld, aspect: number) {
     this.camera = new THREE.PerspectiveCamera(this.baseFov, aspect, 0.05, 600);
@@ -71,6 +78,8 @@ export class Player {
     this.zoomFov = null;
     this.height = 1.8;
     this.crouching = false;
+    this.climb.ladder = null;
+    this.climb.exitT = -1;
   }
 
   get eyePos() {
@@ -148,6 +157,33 @@ export class Player {
     const targetH = this.crouching ? 1.1 : 1.8;
     this.height += (targetH - this.height) * Math.min(1, dt * 14);
     this.eye = this.height - 0.18;
+
+    // ---- ladders: walk into one to climb it (forward = up, back = down, jump = let go)
+    ladderTick(this, dt);
+    if (!this.alive) this.climb.ladder = null;
+    if (this.alive && !this.climb.active) {
+      if (tryGrab(this.world, this, input.moveY, -Math.sin(this.yaw), -Math.cos(this.yaw), this.grounded)) {
+        this.jumpBuffer = 0;
+      }
+    }
+    if (this.climb.active) {
+      const still = climbStep(this.world, this, dt, input.moveY, input.moveX, input.jump);
+      if (still) {
+        this.grounded = !this.climb.active;
+        this.sprinting = false;
+        this.speed01 = 0;
+        this.bobAmt += (0 - this.bobAmt) * Math.min(1, dt * 8);
+        // gentle rung-by-rung sway while moving
+        if (Math.abs(this.vel.y) > 0.5) this.bobPhase += dt * 7;
+        this.fallStartVel = 0;
+        this.updateCamera(dt);
+        return;
+      }
+      // let go (jump / bottom / side): carry on with normal movement this frame
+      this.grounded = false;
+      this.coyote = 0;
+      this.jumpBuffer = 0;
+    }
 
     // ---- move
     const mx = this.alive ? input.moveX : 0;

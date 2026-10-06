@@ -83,6 +83,7 @@
           <div class="menu-buttons">
             <button id="play-btn" class="big-btn">PLAY SOLO</button>
             <button id="friends-btn" class="big-btn alt">PLAY WITH FRIENDS</button>
+            <button id="bots-btn" class="big-btn bots">PLAY VS BOTS</button>
           </div>
           <div class="menu-row">
             <button id="fs-btn" class="small-btn">⛶ FULLSCREEN</button>
@@ -116,6 +117,32 @@
           <div id="end-title" class="title-sm">YOU GOT PACKED AWAY</div>
           <div id="end-stats"></div>
           <button id="restart-btn" class="big-btn">PLAY AGAIN</button>
+        </div>
+      </div>
+
+      <!-- Match against computer opponents -->
+      <div id="bots" class="screen hidden">
+        <div class="lobby-card bots-card">
+          <div class="lobby-col">
+            <div class="lobby-title">PLAY VS BOTS</div>
+            <div class="lobby-sub">GAME MODE</div>
+            <div id="bot-modes">
+              <button class="mode-btn" data-mode="duel"><b>1 V 1 DUEL</b><span>You against one bot. First to 10.</span></button>
+              <button class="mode-btn" data-mode="ffa"><b>FREE FOR ALL</b><span>Everyone against everyone. First to 20.</span></button>
+              <button class="mode-btn" data-mode="tdm"><b>TEAM BATTLE</b><span>You and bot team-mates against a bot squad.</span></button>
+              <button class="mode-btn" data-mode="hidden"><b>HIDDEN TROOPERS</b><span>Hide in the toy army, steal toys, unmask the bots.</span></button>
+            </div>
+          </div>
+          <div class="lobby-col">
+            <div class="lobby-sub" id="bot-size-label">BOTS</div>
+            <div id="bot-size" class="chip-row"></div>
+            <div class="lobby-sub">DIFFICULTY</div>
+            <div id="bot-diff" class="chip-row">
+              <button class="chip-btn" data-diff="easy">EASY</button><button class="chip-btn" data-diff="normal">NORMAL</button><button class="chip-btn" data-diff="hard">HARD</button>
+            </div>
+            <button id="bots-start" class="big-btn">START</button>
+            <div class="lobby-actions"><button id="bots-back" class="small-btn">BACK</button></div>
+          </div>
         </div>
       </div>
 

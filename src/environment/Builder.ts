@@ -78,6 +78,7 @@ export class Builder {
       g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
     }
     g.applyMatrix4(mat);
+    worldUV(g);
     // vertex colours w/ contact AO from world height
     const p = g.attributes.position as THREE.BufferAttribute;
     const cols = new Float32Array(p.count * 3);
@@ -211,6 +212,29 @@ export class Builder {
     emit(this.noShadow, false);
     return this.group;
   }
+}
+
+/** World units per tile of the shared plastic / fabric / card detail maps. */
+const UV_TILE = 10;
+
+/**
+ * Box-projected world-space UVs: every face samples the detail map at the same
+ * density along the axes it actually spans, so nothing is stretched, scales
+ * match between neighbouring pieces and seams line up across them.
+ */
+export function worldUV(g: THREE.BufferGeometry) {
+  const p = g.attributes.position as THREE.BufferAttribute;
+  const n = g.attributes.normal as THREE.BufferAttribute | undefined;
+  const uv = g.attributes.uv as THREE.BufferAttribute;
+  if (!n) return;
+  for (let i = 0; i < p.count; i++) {
+    const ax = Math.abs(n.getX(i)), ay = Math.abs(n.getY(i)), az = Math.abs(n.getZ(i));
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    if (ay >= ax && ay >= az) uv.setXY(i, x / UV_TILE, z / UV_TILE);
+    else if (ax >= az) uv.setXY(i, z / UV_TILE, y / UV_TILE);
+    else uv.setXY(i, x / UV_TILE, y / UV_TILE);
+  }
+  uv.needsUpdate = true;
 }
 
 export function scaleUV(geo: THREE.BufferGeometry, s: number) {

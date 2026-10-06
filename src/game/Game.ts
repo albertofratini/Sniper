@@ -121,6 +121,7 @@ export class Game {
     this.world.mergeStacks();
     this.surfaces = new SurfaceIndex(this.room.group);
     this.nav = new NavGrid(this.world, 2.4, 0.7, 3.3);
+    this.nav.addLadderLinks(this.world.ladders);
     this.navLarge = new NavGrid(this.world, 3.8, 1.5, 2.0);
     this.navHuge = new NavGrid(this.world, 10.5, 3.0, 1.0);
     // make sure no spawn or pickup point sits inside furniture
@@ -207,7 +208,7 @@ export class Game {
     document.addEventListener('fullscreenchange', () => setTimeout(() => this.resize(), 100));
     document.addEventListener('visibilitychange', () => {
       // multiplayer matches keep running in the background
-      if (document.hidden && this.state === 'playing' && !this.inMatch) this.pause();
+      if (document.hidden && this.state === 'playing' && !this.matchLive) this.pause();
     });
     this.resize();
 
@@ -303,6 +304,11 @@ export class Game {
     return !!this.mp && !!this.mp.self.inMatch && this.mode !== 'survival';
   }
 
+  /** online matches keep running behind the pause menu; offline bot matches really pause */
+  get matchLive() {
+    return this.inMatch && !this.mp!.offline;
+  }
+
   get selfId() {
     return this.mp?.self.id ?? 'me';
   }
@@ -367,7 +373,7 @@ export class Game {
     this.composer?.setSize(w, h);
     const portrait = this.input.isTouch && h > w;
     document.getElementById('rotate')!.classList.toggle('hidden', !portrait);
-    if (portrait && this.state === 'playing' && !this.inMatch) this.pause();
+    if (portrait && this.state === 'playing' && !this.matchLive) this.pause();
   }
 
   // ------------------------------------------------------------------ flow
@@ -447,7 +453,7 @@ export class Game {
 
   pause() {
     if (this.state !== 'playing') return;
-    if (this.inMatch) {
+    if (this.matchLive) {
       // matches can't be paused; just release the mouse and show the menu overlay
       this.state = 'paused';
       this.input.reset();
@@ -1139,9 +1145,9 @@ export class Game {
     this.time += dt;
     if (this.state === 'menu' || this.state === 'over') this.updateMenuCam(dt);
     // matches keep simulating while the pause overlay is open
-    const live = this.state === 'playing' || this.state === 'dying' || (this.state === 'paused' && this.inMatch) || this.state === 'mpover';
+    const live = this.state === 'playing' || this.state === 'dying' || (this.state === 'paused' && this.matchLive) || this.state === 'mpover';
     if (live) this.updatePlaying(dt);
-    if (this.state !== 'paused' || this.inMatch) {
+    if (this.state !== 'paused' || this.matchLive) {
       this.updateAmbient(dt);
       this.fx.update(dt, this.player.camera);
       debris.update(dt);
